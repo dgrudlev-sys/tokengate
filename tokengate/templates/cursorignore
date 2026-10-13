@@ -1,0 +1,21 @@
+# Keep Cursor's indexer and @-context away from bulky, generated or vendored files.
+node_modules/
+android/
+ios/
+.expo/
+build/
+dist/
+coverage/
+.tokengate/
+*.lock
+package-lock.json
+yarn.lock
+*.min.js
+*.map
+*.png
+*.jpg
+*.ttf
+*.otf
+*.mp3
+*.sqlite
+*.db

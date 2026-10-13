@@ -1,0 +1,29 @@
+# tokengate configuration. Providers are tried top to bottom; Cursor is the implicit last resort.
+
+# Directories never indexed (also put them in .cursorignore so Cursor doesn't index them either)
+ignore = ["node_modules", ".git", ".expo", "android", "ios", "build", "dist", "__pycache__", ".venv", ".tokengate", "coverage", "Pods"]
+extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sql"]
+
+max_context_tokens = 12000   # cap on context sent to a free model per call
+pack_budget_tokens = 2500    # cap on context packs returned to Cursor
+cache_ttl_days = 30
+
+[[providers]]
+name = "ollama"                       # local, free, private; skipped if not running
+base_url = "http://localhost:11434/v1"
+models = ["qwen2.5-coder:7b"]
+rpm = 600
+max_parallel = 1
+
+[[providers]]
+name = "nvidia"                       # https://build.nvidia.com: free developer credits
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_API_KEY"
+# Run `tokengate models` to list what your key can use, then edit this list (best first).
+models = [
+  "qwen/qwen2.5-coder-32b-instruct",
+  "meta/llama-3.3-70b-instruct",
+  "mistralai/mixtral-8x22b-instruct-v0.1",
+]
+rpm = 35            # stay under NVIDIA's per-minute limit
+max_parallel = 4

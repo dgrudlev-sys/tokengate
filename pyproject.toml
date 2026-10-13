@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tokengate"
+version = "0.1.0"
+description = "Token gate between Cursor and your codebase: code graph + cache + local/NVIDIA models first, Cursor tokens last."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.2"]
+dev = ["pytest"]
+
+[project.scripts]
+tokengate = "tokengate.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["tokengate*"]
+
+[tool.setuptools.package-data]
+tokengate = ["templates/*"]

@@ -1,0 +1,27 @@
+---
+description: Token budget policy. Use tokengate MCP tools before spending Cursor tokens.
+alwaysApply: true
+---
+
+# Token budget: tokengate first, Cursor tokens last
+
+The user's Cursor quota is limited. The `tokengate` MCP server provides free alternatives. Use them in this order:
+
+1. **Explore with the graph instead of reading files.**
+   - `repo_map` once per conversation for orientation.
+   - `graph_file <path>` for a file's outline (signatures + line numbers) and its neighbours.
+   - `graph_symbol <name>` to find a definition. `graph_impact <path>` before changing shared code.
+   - `search <regex>` instead of grep-style file reads.
+   - Then read **only the line ranges** you actually need, never whole large files.
+2. **Delegate the writing.** For edits, tests, docs, reviews, explanations and summaries call
+   `delegate(task, files, kind)` first. It runs on free models (local Ollama → NVIDIA NIM).
+   - `status=done` with `files changed` → the edit is already on disk. Do not rewrite it; skim with a
+     narrow read or `run_checks` and move on.
+   - `status=escalate` → do the task yourself using the context pack it returned (don't re-explore).
+3. **Batch work** over many files with `distribute(task, glob, kind)`, not file-by-file in chat.
+4. **Verify with `run_checks`**, not by re-reading code.
+5. Keep replies short. No restating code you didn't change. No full-file rewrites when a small edit works.
+
+Do the work yourself straight away (skip delegate) only when: the task needs this conversation's
+history, it spans many files with tightly coupled design decisions, or delegate already escalated
+the same task.
