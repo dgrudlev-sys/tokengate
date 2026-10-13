@@ -74,7 +74,7 @@ class Result:
             parts.append("files changed (already written to disk, review with git diff): " + ", ".join(self.files_changed))
         if self.text:
             parts.append(self.text)
-        if self.attempts:
+        if self.attempts and self.status == "escalate":
             parts.append("attempts: " + " | ".join(self.attempts))
         if self.context_pack:
             parts.append("Cheap models could not finish this. Minimal context for you:\n" + self.context_pack)
@@ -153,6 +153,9 @@ class Gate:
             if not client.usable:
                 attempts.append(f"{prov.name}: unavailable")
                 continue
+            if prov.rpd and self.store.requests_today(prov.name) >= prov.rpd:
+                attempts.append(f"{prov.name}: daily cap {prov.rpd} reached")
+                continue
             for model in client.models():
                 try:
                     comp = client.chat(model, messages, max_tokens=max_tokens)
@@ -170,6 +173,7 @@ class Gate:
                 if res is None:
                     attempts.append(f"{prov.name}/{model}: rejected (edit did not apply or broke checks)")
                     continue
+                res.attempts = attempts
                 self.store.put(key, prov.name, model, text)
                 self.store.log(tier, prov.name, model, comp.tokens_in, comp.tokens_out,
                                avoided=cursor_would_read + comp.tokens_out, task=task)

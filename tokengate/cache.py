@@ -41,6 +41,10 @@ class Store:
                         (time.time(), tier, provider, model, tokens_in, tokens_out, avoided, task[:200]))
         self.db.commit()
 
+    def requests_today(self, provider: str) -> int:
+        return self.db.execute("SELECT COUNT(*) FROM ledger WHERE provider=? AND tier!='cache' AND ts>?",
+                               (provider, time.time() - 86400)).fetchone()[0]
+
     def stats(self, days: int = 30) -> dict:
         since = time.time() - days * 86400
         rows = self.db.execute(

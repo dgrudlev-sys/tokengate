@@ -29,6 +29,8 @@ class Provider:
     max_parallel: int = 4
     timeout: int = 120
     enabled: bool = True
+    rpd: int = 0                  # requests per day we allow ourselves (0 = no cap)
+    may_train: bool = False       # provider's free tier may train on prompts (your code)
 
     @property
     def api_key(self) -> str | None:
@@ -36,7 +38,12 @@ class Provider:
 
     @property
     def available(self) -> bool:
+        if self.may_train and os.environ.get("TOKENGATE_ALLOW_TRAINING", "") != "1" and not _ALLOW_TRAINING[0]:
+            return False
         return self.enabled and (self.api_key_env is None or bool(self.api_key))
+
+
+_ALLOW_TRAINING = [False]  # set from tokengate.toml `allow_training_providers`
 
 
 def _default_providers() -> list[Provider]:
@@ -79,6 +86,13 @@ class Config:
     # Default budget for context packs returned to Cursor.
     pack_budget_tokens: int = 2500
     cache_ttl_days: int = 30
+    # Gas gauge thresholds (% of Cursor's included usage).
+    gauge_warn_pct: float = 60
+    gauge_reserve_pct: float = 85
+    # Cursor beforeSubmitPrompt hook: "auto" | "always" | "off"
+    prompt_gate: str = "auto"
+    # Use providers whose free tier may train on your prompts (Gemini free, Mistral Experiment)?
+    allow_training_providers: bool = False
 
     @property
     def state_dir(self) -> Path:
@@ -109,9 +123,11 @@ def load(root: Path | None = None) -> Config:
     if not (path.exists() and tomllib):
         return cfg
     data = tomllib.loads(path.read_text(encoding="utf-8"))
-    for key in ("ignore", "extensions", "max_context_tokens", "pack_budget_tokens", "cache_ttl_days"):
+    for key in ("ignore", "extensions", "max_context_tokens", "pack_budget_tokens", "cache_ttl_days",
+                "gauge_warn_pct", "gauge_reserve_pct", "prompt_gate", "allow_training_providers"):
         if key in data:
             setattr(cfg, key, data[key])
     if "providers" in data:
         cfg.providers = [Provider(**p) for p in data["providers"]]
+    _ALLOW_TRAINING[0] = bool(cfg.allow_training_providers)
     return cfg

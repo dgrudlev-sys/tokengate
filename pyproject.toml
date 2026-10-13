@@ -20,4 +20,4 @@ tokengate = "tokengate.cli:main"
 include = ["tokengate*"]
 
 [tool.setuptools.package-data]
-tokengate = ["templates/*"]
+tokengate = ["templates/*", "templates/statusbar/*"]

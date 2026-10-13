@@ -8,22 +8,94 @@ max_context_tokens = 12000   # cap on context sent to a free model per call
 pack_budget_tokens = 2500    # cap on context packs returned to Cursor
 cache_ttl_days = 30
 
+# Gas gauge: % of Cursor's included usage at which tokengate warns / enters reserve mode
+gauge_warn_pct = 60
+gauge_reserve_pct = 85
+
+# Front door: Cursor's beforeSubmitPrompt hook sends your chat message to tokengate FIRST.
+#   "auto"   clear self-contained tasks (explain / review / tests / docs / small named-file edits)
+#   "always" every message (Cursor only runs if free models escalate)
+#   "off"    hook does nothing
+# Reserve/empty fuel level upgrades "auto" to "always". Start a message with "!" to skip tokengate.
+prompt_gate = "auto"
+
+# Gemini's free tier and Mistral's Experiment plan may use your prompts (= your code) for training.
+# They stay off unless you set this to true.
+allow_training_providers = false
+
+# ---------------------------------------------------------------------------------------------
+# Free providers, tried top to bottom. A provider without its API key set is skipped silently,
+# so add keys for whichever ones you sign up to. Cursor is the implicit last resort.
+# Limits below are deliberately a bit under each free tier (as reported October 2026); free
+# tiers change often, so check each console. Run `tokengate models` to see the real model IDs
+# your keys can use, and edit `models` (best first).
+# ---------------------------------------------------------------------------------------------
+
 [[providers]]
-name = "ollama"                       # local, free, private; skipped if not running
+name = "ollama"                       # local: free, private, unlimited; skipped if not running
 base_url = "http://localhost:11434/v1"
 models = ["qwen2.5-coder:7b"]
 rpm = 600
 max_parallel = 1
 
 [[providers]]
-name = "nvidia"                       # https://build.nvidia.com: free developer credits
+name = "nvidia"                       # build.nvidia.com: ~40 RPM, no daily cap reported
 base_url = "https://integrate.api.nvidia.com/v1"
 api_key_env = "NVIDIA_API_KEY"
-# Run `tokengate models` to list what your key can use, then edit this list (best first).
-models = [
-  "qwen/qwen2.5-coder-32b-instruct",
-  "meta/llama-3.3-70b-instruct",
-  "mistralai/mixtral-8x22b-instruct-v0.1",
-]
-rpm = 35            # stay under NVIDIA's per-minute limit
+models = ["qwen/qwen2.5-coder-32b-instruct", "meta/llama-3.3-70b-instruct", "mistralai/mixtral-8x22b-instruct-v0.1"]
+rpm = 35
 max_parallel = 4
+
+[[providers]]
+name = "groq"                         # console.groq.com: ~30 RPM, ~1,000 req/day per model, very fast
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+models = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
+rpm = 25
+rpd = 900
+max_parallel = 3
+
+[[providers]]
+name = "cerebras"                     # cloud.cerebras.ai: free limits reported inconsistently, kept low
+base_url = "https://api.cerebras.ai/v1"
+api_key_env = "CEREBRAS_API_KEY"
+models = ["gpt-oss-120b", "llama-3.3-70b"]
+rpm = 5
+max_parallel = 1
+
+[[providers]]
+name = "github"                       # GitHub Models: free with a GitHub account (PAT with models:read)
+base_url = "https://models.github.ai/inference"
+api_key_env = "GITHUB_MODELS_TOKEN"
+models = ["openai/gpt-4.1-mini", "openai/gpt-4.1"]
+rpm = 10
+rpd = 140                             # low tier is ~150/day on Copilot Free; higher on paid Copilot
+max_parallel = 2
+
+[[providers]]
+name = "openrouter"                   # openrouter.ai `:free` models: 20 RPM, 50/day (1,000/day after a one-time $10 top-up)
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+models = ["qwen/qwen3-coder:free", "deepseek/deepseek-chat-v3.1:free"]
+rpm = 15
+rpd = 45
+max_parallel = 2
+
+[[providers]]
+name = "mistral"                      # Mistral "Experiment" plan: free (phone verification), includes Codestral
+base_url = "https://api.mistral.ai/v1"
+api_key_env = "MISTRAL_API_KEY"
+models = ["codestral-latest", "mistral-small-latest"]
+rpm = 2
+max_parallel = 1
+may_train = true                      # Experiment-plan requests may be used for training
+
+[[providers]]
+name = "gemini"                       # aistudio.google.com: free Flash / Flash-Lite, limits shown only in AI Studio
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+api_key_env = "GEMINI_API_KEY"
+models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+rpm = 8
+rpd = 200
+max_parallel = 2
+may_train = true                      # free-tier content may be used to improve Google products

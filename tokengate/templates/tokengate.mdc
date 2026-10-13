@@ -5,7 +5,14 @@ alwaysApply: true
 
 # Token budget: tokengate first, Cursor tokens last
 
-The user's Cursor quota is limited. The `tokengate` MCP server provides free alternatives. Use them in this order:
+The user's Cursor quota is limited. The `tokengate` MCP server provides free alternatives.
+
+**Before anything else:** if `.tokengate/HANDOFF.md` exists and its `prompt:` matches the user's message,
+tokengate already tried free models and gathered the context. Read that file instead of exploring.
+Call `fuel_gauge` once per conversation. A `[gauge WARN|RESERVE|EMPTY]` line in any tool output
+means the quota is nearly gone: delegate everything delegable, never re-read files, answer in a few lines.
+
+Use the tools in this order:
 
 1. **Explore with the graph instead of reading files.**
    - `repo_map` once per conversation for orientation.

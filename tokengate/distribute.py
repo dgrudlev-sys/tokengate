@@ -19,11 +19,13 @@ from .router import SYSTEM, Gate
 MAX_FILES = 200
 
 
-def _slots(cfg: Config) -> list[tuple[Client, str]]:
+def _slots(cfg: Config, store=None) -> list[tuple[Client, str]]:
     """Every (client, model) pair we can use, interleaved so load spreads across providers."""
     per_provider = []
     for p in cfg.providers:
         c = Client(p)
+        if p.rpd and store is not None and store.requests_today(p.name) >= p.rpd:
+            continue
         if c.usable:
             per_provider.append([(c, m) for m in c.models()])
     return [s for group in itertools.zip_longest(*per_provider) for s in group if s]
@@ -50,7 +52,7 @@ def fan_out(gate: Gate, task: str, pattern: str, kind: str = "summarize", reduce
     files = sorted(p for p in gate.graph.files if fnmatch.fnmatch(p, pattern))[:MAX_FILES]
     if not files:
         return {"status": "no files matched", "pattern": pattern}
-    slots = _slots(cfg)
+    slots = _slots(cfg, gate.store)
     if not slots:
         return {"status": "escalate", "reason": "no free providers available (set NVIDIA_API_KEY or start Ollama)"}
 

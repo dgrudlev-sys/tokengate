@@ -1,105 +1,112 @@
 # tokengate
 
-A gate between Cursor and your code. Before Cursor spends paid tokens, tokengate tries free options in this order:
+**Free compute first, paid Cursor tokens last.** tokengate sits in front of Cursor. It answers your chat message with a code graph, a cache, a local model, or free cloud APIs (NVIDIA, Groq, GitHub Models, OpenRouter…). Cursor's own model only runs when all of those fail. A fuel gauge shows how much Cursor usage you have left and when you'll run out.
+
+![gauge](docs/gauge-light.png)
+
+## How Cursor is kept from going first
+
+Cursor's chat model normally reads every message *before* it decides to call a tool, so an MCP server alone can't stop that first spend. tokengate adds a **front door** using Cursor's `beforeSubmitPrompt` hook (`.cursor/hooks.json`):
+
+```
+your message ──► tokengate hook ──► free model did it?  ── yes ──► prompt blocked, Cursor model never runs (0 tokens)
+                                    │                                answer in popup + .tokengate/last_answer.md
+                                    │                                edits already on disk (git diff)
+                                    └─ no / not suitable ──► Cursor runs; .tokengate/HANDOFF.md has the context
+```
+
+- **`prompt_gate = "auto"`** (default) intercepts self-contained tasks: *explain, summarize, review, write tests, add docs*, and small edits in files you name. It passes through anything that depends on chat history ("yes do it", "fix the error above") or is open-ended.
+- **`"always"`** intercepts every message. **`"off"`** disables the hook.
+- When the fuel gauge is in **reserve**, `auto` behaves like `always`.
+- Start a message with **`!`** to send it straight to Cursor.
+- The hook **fails open**: if it errors, your message goes to Cursor as usual.
+
+Inside Cursor's turn, the MCP tools and an `alwaysApply` rule keep it cheap: graph outlines instead of whole files, `delegate` for writing, and `run_checks` for verifying.
+
+## The escalation ladder
 
 | Tier | What | Cost |
 |---|---|---|
-| 0 | **Code graph** (outlines, symbols, imports, blast radius), ripgrep search, local `tsc` / `eslint` / `ruff` / `pytest` | free |
-| 1 | **Cache** of earlier answers (same task + same code gives the same answer) | free |
-| 2 | **Local model** via Ollama, if it's running | free |
-| 3 | **NVIDIA NIM** (build.nvidia.com free credits); several models, rate-limited, run in parallel | free quota |
-| 4 | **Cursor**, handed a minimal context pack so it doesn't re-explore | paid, last |
+| 0 | Code graph (outlines, symbols, imports, blast radius), ripgrep, local `tsc`/`eslint`/`ruff`/`pytest` | free |
+| 1 | Cache: same task on the same code gives the same answer | free |
+| 2 | Local model via Ollama | free |
+| 3 | Free cloud APIs, in `tokengate.toml` order, each with its own per-minute and daily caps | free quota |
+| 4 | Cursor, handed a minimal context pack | paid, last |
 
-Cursor talks to it over **MCP**. A Cursor rule (`.cursor/rules/tokengate.mdc`, `alwaysApply`) tells the agent to use these tools first.
+Free models can refuse with `ESCALATE: reason`. An edit is all-or-nothing (every `SEARCH` block must match exactly), and it is rolled back if typecheck or lint errors go up. Each failure moves on to the next model.
 
-## Why this saves tokens
+## Free API providers (pre-configured)
 
-Most agent tokens go to *reading* code (opening whole files to find one function) and *writing* long outputs.
+Add a key for any of these and it joins the ladder. A provider with no key is skipped. The limits below are as reported in October 2026. Free tiers change often, so tokengate's defaults sit slightly under them. Check each console.
 
-- **Reading**: `graph_file` returns a ~100-token outline (signatures plus line numbers) instead of a 1,000+ token file. `repo_map` replaces exploratory `ls` and `read` loops.
-- **Writing**: `delegate` makes a free model produce the edit and writes it to disk. Cursor only sees `status=done, files changed: …`.
-- **Batch work** (`distribute`) never touches Cursor at all. Results go to `.tokengate/out/`.
-- **`.cursorignore`** keeps `node_modules`, `android/`, `ios/` and lockfiles out of Cursor's index and @-context.
+| Provider | Sign up | Env var | Free limits (approx.) | Notes |
+|---|---|---|---|---|
+| Ollama (local) | ollama.com | – | unlimited | private; `ollama pull qwen2.5-coder:7b` |
+| NVIDIA NIM | build.nvidia.com | `NVIDIA_API_KEY` | ~40 RPM | 100+ models; dev/test use only |
+| Groq | console.groq.com | `GROQ_API_KEY` | ~30 RPM, ~1,000 req/day | very fast; daily token caps |
+| Cerebras | cloud.cerebras.ai | `CEREBRAS_API_KEY` | reported inconsistently | defaults kept low |
+| GitHub Models | github.com/marketplace/models | `GITHUB_MODELS_TOKEN` | ~15 RPM / 150 per day (Copilot Free) | PAT with `models:read`; more with paid Copilot |
+| OpenRouter | openrouter.ai | `OPENROUTER_API_KEY` | 20 RPM, 50/day (1,000/day after a one-time $10) | many `:free` models |
+| Mistral (Experiment) | console.mistral.ai | `MISTRAL_API_KEY` | low RPM, large monthly tokens | Codestral; **may train on prompts** |
+| Google Gemini | aistudio.google.com | `GEMINI_API_KEY` | shown only in AI Studio | Flash/Flash-Lite; **may train on prompts** |
 
-## Install (once)
+Providers that may train on your prompts (and therefore your code) are **off** unless you set `allow_training_providers = true`. Run `tokengate models` to list the real model IDs each key can use, then put the best ones first. To track changes to free tiers, see the community list [cheahjs/free-llm-api-resources](https://github.com/cheahjs/free-llm-api-resources).
 
-```bash
-pip install -e path/to/tokengate[mcp]        # Python 3.10+
-```
-
-Get a free key at https://build.nvidia.com (open any model, then "Get API Key") and set it:
-
-```powershell
-# Windows (PowerShell), persistent
-setx NVIDIA_API_KEY "nvapi-..."
-```
-```bash
-# macOS / Linux
-echo 'export NVIDIA_API_KEY=nvapi-...' >> ~/.zshrc
-```
-
-Optional local tier: install [Ollama](https://ollama.com), then run `ollama pull qwen2.5-coder:7b`.
-
-## Plug into a project
+## Fuel gauge
 
 ```bash
+tokengate gauge                      # E [████████······················] F  28% left  … runs out 2026-10-19
+tokengate gauge --set 72 --cycle-end 2026-10-28   # manual reading from cursor.com/dashboard
+tokengate dashboard                  # http://127.0.0.1:8765 (gauge, pace vs cycle, free-provider caps, savings)
+tokengate install-statusbar          # ▮▮▯▯▯ 28% in Cursor's status bar, turns red in reserve
+```
+
+- **Cursor usage** is read the way community trackers do it (MIT-licensed [cursor-usage-tracker](https://github.com/Tendo33/cursor-usage-tracker)): Cursor's own login token from its local `state.vscdb`, sent read-only to the `cursor.com/api/usage-summary` endpoint the dashboard uses. **This endpoint is unofficial and can change.** If auto-read fails, set `CURSOR_SESSION_TOKEN` (the `WorkosCursorSessionToken` cookie from your browser) or use `--set`. Readings are cached for 5 minutes.
+- **Forecast**: a linear burn rate over the billing cycle, giving "projected % at cycle end" and "runs out on".
+- **Levels**: `ok` → `warn` (≥ 60%, or the pace overshoots) → `reserve` (≥ 85%, or the pace is far over) → `empty`. Thresholds live in `tokengate.toml`. From `warn` upward, every tokengate tool output starts with a `[gauge …]` line telling Cursor's agent to economise.
+- **Free providers**: none of them expose remaining quota, so the gauge shows tokengate's own usage against each provider's caps.
+
+## Install
+
+```bash
+pip install "git+https://github.com/<you>/tokengate.git#egg=tokengate[mcp]"   # or: pip install -e ./tokengate[mcp]
 cd your-project
-tokengate init        # writes tokengate.toml, .cursor/mcp.json, .cursor/rules/tokengate.mdc,
-                      # .cursorignore, adds .tokengate/ to .gitignore, builds the graph
-tokengate models      # see which NVIDIA models your key can use; put the best first in tokengate.toml
+tokengate init      # tokengate.toml, .cursor/{mcp.json,hooks.json,rules/tokengate.mdc}, .cursorignore, graph
+tokengate models    # check model IDs per provider
 ```
 
-Restart Cursor, then turn on **tokengate** under *Settings → MCP*. Run `tokengate init` again on each machine; it writes that machine's Python path into `.cursor/mcp.json`.
+Set the API keys you have as environment variables. On Windows: `setx NVIDIA_API_KEY "nvapi-..."`. Then restart Cursor and turn on **tokengate** under *Settings → MCP*. Run `tokengate init` on each machine, because it writes that machine's Python path into the Cursor configs.
 
-## MCP tools (what Cursor sees)
+## MCP tools
 
-| Tool | Use |
-|---|---|
-| `repo_map` | whole-repo map: files, exported symbols, token sizes |
-| `graph_file(path)` | outline of a file plus imports and imported-by |
-| `graph_symbol(name)` | where something is defined, with its signature |
-| `graph_impact(path)` | everything that transitively depends on a file |
-| `context_pack(task)` | smallest relevant context for a task |
-| `search(regex)` | capped ripgrep |
-| `run_checks()` | typecheck, lint and tests; returns only failures |
-| `delegate(task, files, kind)` | free models do the work. `kind`: `edit`, `tests`, `docs`, `review`, `explain`, `summarize`, `general` |
-| `distribute(task, glob, kind)` | same task over many files, spread across all free models |
-| `savings()` | estimated Cursor tokens avoided per tier |
+`repo_map`, `graph_file`, `graph_symbol`, `graph_impact`, `context_pack`, `search`, `run_checks`, `delegate`, `distribute`, `savings`, `fuel_gauge`. Each tool's description explains when to use it.
 
-### How `delegate` decides it's good enough
-
-1. The model can refuse with `ESCALATE: reason`. tokengate then moves on to the next model.
-2. Edits must come back as `SEARCH/REPLACE` blocks. **All** blocks must match the file exactly, otherwise nothing is written and the next model is tried.
-3. With `verify=True`, tokengate counts typecheck and lint errors before and after the edit. If the count goes up, the edit is rolled back and the next model is tried.
-4. Only when every free option fails does it return `status=escalate`, together with a context pack for Cursor.
-
-## CLI (same features, no Cursor needed)
+## CLI
 
 ```bash
-tokengate viz                                   # .tokengate/graph.html (interactive), graph.mmd, REPO_MAP.md
-tokengate query symbol detectMisquote
-tokengate query impact src/constants/bible.constants.ts
-tokengate ask "add input validation to parseReference" -f Layer1_ReferenceParser.ts -k edit
+tokengate viz                     # .tokengate/graph.html (interactive), graph.mmd, REPO_MAP.md
+tokengate query symbol detectMisquote | file ReaderScreen | impact src/constants/bible.constants.ts
 tokengate ask "explain the search pipeline" -k explain
-tokengate fanout "list bugs and accessibility issues" "src/screens/**/*.tsx" -k review
-tokengate check
-tokengate stats
+tokengate ask "add input validation to parseReference" -f Layer1_ReferenceParser.ts -k edit
+tokengate fanout "list bugs and a11y issues" "src/screens/**/*.tsx" -k review
+tokengate check | stats | gauge | dashboard
 ```
 
-## Config: `tokengate.toml`
+## Prior art (what to borrow next)
 
-Providers are tried top to bottom. You can add any OpenAI-compatible endpoint (Groq, OpenRouter free models, LM Studio, and so on) as another `[[providers]]` block with `name`, `base_url`, `api_key_env`, `models`, `rpm` and `max_parallel`.
+| Project | What it does well | How tokengate relates |
+|---|---|---|
+| [graphify](https://graphify.com/integrations/cursor) (PyPI `graphifyy`, MIT) | tree-sitter AST graph, MCP server, `graphify cursor install`, ~7–50x fewer tokens in independent tests | same idea as tokengate's graph tier. Swap in its graph for more languages and call-level edges |
+| aider repo map | tree-sitter tags + PageRank, budget-fitted map | tokengate's `rank()` is a lightweight version; PageRank is the upgrade path |
+| [Local Worker MCP](https://glama.ai/mcp/servers/xcj1rfla17), [Claude Code Token Saver](https://mcp.so/servers/cc_token_saver_mcp), [Ultimate MCP / llm_gateway](https://glama.ai/mcp/servers/Dicklesworthstone/llm_gateway_mcp_server) | delegate mechanical work to cheap or local models | tokengate adds edit validation, rollback, per-provider caps and the prompt-gate hook |
+| [cursor-usage-tracker](https://github.com/Tendo33/cursor-usage-tracker) (MIT), cursor-stats (archived) | Cursor usage in the status bar | the gauge reuses their documented approach (no code copied) |
 
-## Languages
+## Limits
 
-TypeScript/JavaScript (including tsconfig `paths` aliases like `@/`), Python (AST-based), and SQL (`CREATE TABLE`, `VIEW`, `INDEX`, `TRIGGER`). There are no runtime dependencies besides `mcp` for the server.
-
-## Limits (be aware)
-
-- Cursor's agent *chooses* whether to call tools. The rule makes it strongly prefer tokengate, but it can't force it. Check `savings()` and the `escalations_to_cursor` count.
-- Token savings are estimates (characters / 4).
-- Free NVIDIA credits and rate limits are set by NVIDIA. Lower `rpm` if you see 429 errors.
-- Delegated code is written by smaller models. Review the `git diff`, as you would for any agent edit.
+- `beforeSubmitPrompt` can block, but not rewrite, a prompt. Forum reports mention a double popup and occasional non-blocking in some Cursor versions, so test it on yours. Cursor's hook timeout applies: very slow free models can let the prompt through.
+- Cursor's agent still chooses whether to call MCP tools. The rule strongly encourages it but can't force it.
+- Savings figures are estimates (characters / 4).
+- Delegated edits come from smaller models. Review the `git diff`.
 
 ## Tests
 

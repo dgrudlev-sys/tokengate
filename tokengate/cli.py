@@ -10,6 +10,9 @@
   tokengate check                   run local typecheck/lint/tests
   tokengate models                  list models each provider offers your key
   tokengate stats                   tokens saved
+  tokengate gauge [--set PCT] [--json]   Cursor fuel gauge (burn rate, runs-out date)
+  tokengate dashboard [--port 8765]      local gauge dashboard in the browser
+  tokengate install-statusbar            fuel gauge in Cursor's status bar
   tokengate serve                   run the MCP server (Cursor starts this for you)
 """
 
@@ -55,6 +58,17 @@ def cmd_init(args) -> None:
     mcp_path.write_text(json.dumps(data, indent=2) + "\n", "utf-8")
     print(f"wrote {mcp_path}")
 
+    # Front door: tokengate sees each chat prompt before Cursor's model does.
+    hooks_path = root / ".cursor" / "hooks.json"
+    hooks = json.loads(hooks_path.read_text("utf-8")) if hooks_path.exists() else {}
+    hooks.setdefault("version", 1)
+    entries = [h for h in hooks.setdefault("hooks", {}).get("beforeSubmitPrompt", [])
+               if "tokengate.prompt_gate" not in h.get("command", "")]
+    entries.append({"command": f'"{sys.executable}" -m tokengate.prompt_gate'})
+    hooks["hooks"]["beforeSubmitPrompt"] = entries
+    hooks_path.write_text(json.dumps(hooks, indent=2) + "\n", "utf-8")
+    print(f"wrote {hooks_path}")
+
     for target, lines in ((root / ".cursorignore", _template("cursorignore").splitlines()),
                           (root / ".gitignore", [".tokengate/"])):
         existing = target.read_text("utf-8").splitlines() if target.exists() else []
@@ -75,6 +89,16 @@ def cmd_init(args) -> None:
           "'tokengate' server under Settings > MCP.")
 
 
+def cmd_install_statusbar() -> None:
+    """Copy the status-bar gauge into Cursor's extensions folder (unpacked VS Code extension)."""
+    src = resources.files("tokengate").joinpath("templates", "statusbar")
+    dest = Path.home() / ".cursor" / "extensions" / "tokengate.tokengate-gauge-0.1.0"
+    dest.mkdir(parents=True, exist_ok=True)
+    for name in ("package.json", "extension.js"):
+        (dest / name).write_text(src.joinpath(name).read_text("utf-8"), "utf-8")
+    print(f"installed to {dest}\nRestart Cursor. Set 'tokengate.python' in settings if `python` isn't the one with tokengate.")
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="tokengate", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -90,7 +114,15 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("models")
     sub.add_parser("stats")
     sub.add_parser("serve")
+    p = sub.add_parser("gauge"); p.add_argument("--set", type=float, metavar="PCT", help="manual reading from cursor.com/dashboard")
+    p.add_argument("--cycle-end", help="YYYY-MM-DD, with --set"); p.add_argument("--json", action="store_true")
+    p.add_argument("--refresh", action="store_true")
+    p = sub.add_parser("dashboard"); p.add_argument("--port", type=int, default=8765)
+    sub.add_parser("install-statusbar")
     args = ap.parse_args(argv)
+
+    if args.cmd == "install-statusbar":
+        return cmd_install_statusbar()
 
     if args.cmd == "init":
         return cmd_init(args)
@@ -105,6 +137,17 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "check":
         print(json.dumps(local_tools.run_checks(cfg), indent=2))
         return
+    if args.cmd == "gauge":
+        from . import gauge
+        store = Store(cfg.state_dir)
+        if args.set is not None:
+            gauge.set_manual(store, args.set, args.cycle_end)
+        r = gauge.read(cfg, store, refresh=args.refresh)
+        print(gauge.to_json(r) if args.json else gauge.bar(r))
+        return
+    if args.cmd == "dashboard":
+        from .dashboard import serve
+        return serve(cfg, args.port)
     if args.cmd == "stats":
         print(Store(cfg.state_dir).dump())
         return
