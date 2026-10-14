@@ -117,6 +117,8 @@ class Config:
     # Pause once per Cursor chat after this many messages and suggest a fresh chat (0 = off).
     # Every message re-sends the whole chat, so long chats are the biggest hidden cost.
     long_chat_warn: int = 20
+    # Reply compression: "off" | "lite" | "medium" | "full". Free models translate back (tokengate translate).
+    caveman: str = "medium"
     # Providers whose free tier may train on your prompts that you accept: true / false / ["mistral"]
     allow_training: bool | list = False
 
@@ -155,7 +157,7 @@ def load(root: Path | None = None) -> Config:
         text = resources.files("tokengate").joinpath("templates", "tokengate.toml").read_text("utf-8")
     data = tomllib.loads(text)
     for key in ("ignore", "extensions", "max_context_tokens", "pack_budget_tokens", "cache_ttl_days",
-                "gauge_warn_pct", "gauge_reserve_pct", "prompt_gate", "allow_training", "long_chat_warn"):
+                "gauge_warn_pct", "gauge_reserve_pct", "prompt_gate", "allow_training", "long_chat_warn", "caveman"):
         if key in data:
             setattr(cfg, key, data[key])
     if "providers" in data:

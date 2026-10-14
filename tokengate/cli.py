@@ -50,7 +50,9 @@ def cmd_init(args) -> None:
     if "cursor" in args.targets:
         (root / ".cursor" / "rules").mkdir(parents=True, exist_ok=True)
         rule = root / ".cursor" / "rules" / "tokengate.mdc"
-        rule.write_text(_template("tokengate.mdc"), "utf-8")
+        from .style import rule as style_rule
+        level = config.load(root).caveman
+        rule.write_text(_template("tokengate.mdc") + (f"- {style_rule(level)}\n" if style_rule(level) else ""), "utf-8")
         print(f"wrote {rule}")
 
         mcp_path = root / ".cursor" / "mcp.json"
@@ -76,7 +78,7 @@ def cmd_init(args) -> None:
 
     if "claude" in args.targets:
         from .claude_code import install as claude_install
-        for path in claude_install(root):
+        for path in claude_install(root, config.load(root).caveman):
             print(f"wrote {path} (Claude Code)")
 
     ignores = [(root / ".gitignore", [".tokengate/"])]
@@ -143,6 +145,10 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("doctor"); p.add_argument("--offline", action="store_true", help="don't call provider APIs")
     sub.add_parser("demo")
     sub.add_parser("cursor-byok")
+    p = sub.add_parser("translate", help="plain-English version of a terse reply (stdin, file, or Claude's last reply)")
+    p.add_argument("file", nargs="?")
+    p = sub.add_parser("squeeze", help="compress pasted logs/specs with a free model before sending")
+    p.add_argument("file", nargs="?")
     args = ap.parse_args(argv)
 
     if args.cmd == "demo":
@@ -171,6 +177,18 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "doctor":
         from .doctor import report
         print(report(cfg, live=not args.offline))
+        return
+    if args.cmd in ("translate", "squeeze"):
+        from . import style
+        if args.file:
+            text = Path(args.file).read_text("utf-8", errors="replace")
+        elif not sys.stdin.isatty():
+            text = sys.stdin.read()
+        else:
+            saved = cfg.state_dir / "last_reply.md"
+            print(saved.read_text("utf-8") if saved.exists() else "Paste text via stdin or pass a file.")
+            return
+        print((style.translate if args.cmd == "translate" else style.squeeze)(cfg, text))
         return
     if args.cmd == "cursor-byok":
         from .setup_wizard import byok_instructions

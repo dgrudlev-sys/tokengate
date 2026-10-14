@@ -36,14 +36,16 @@ def _commands() -> dict[str, str]:
         py = f'"{sys.executable}"'
         return {"install": f'{py} -c "import tokengate"',
                 "mcp": [sys.executable, ["-m", "tokengate.mcp_server"]],
-                "hook": f"{py} -m tokengate.prompt_gate"}
+                "hook": f"{py} -m tokengate.prompt_gate",
+                "stop": f"{py} -m tokengate.style"}
     install = (f'python3 -c "import tokengate" 2>/dev/null || flock /tmp/tokengate-install.lock '
                f'sh -c \'python3 -c "import tokengate" 2>/dev/null || '
                f'python3 -m pip install -q "tokengate[mcp] @ {REPO}" >/dev/null 2>&1\'')
     return {"install": install,
             "mcp": ["sh", ["-c", f"{install}; exec python3 -m tokengate.mcp_server"]],
             # never install inside the prompt hook (it would delay the prompt); fail open if missing
-            "hook": 'python3 -c "import tokengate" 2>/dev/null && python3 -m tokengate.prompt_gate || echo "{}"'}
+            "hook": 'python3 -c "import tokengate" 2>/dev/null && python3 -m tokengate.prompt_gate || echo "{}"',
+            "stop": 'python3 -c "import tokengate" 2>/dev/null && python3 -m tokengate.style || echo "{}"'}
 
 
 def _load(path: Path) -> dict:
@@ -57,7 +59,7 @@ def _without_tokengate(entries: list) -> list:
     return [e for e in entries if "tokengate" not in json.dumps(e)]
 
 
-def install(root: Path) -> list[str]:
+def install(root: Path, caveman: str = "medium") -> list[str]:
     cmds, written = _commands(), []
 
     mcp_path = root / ".mcp.json"
@@ -74,6 +76,9 @@ def install(root: Path) -> list[str]:
     hooks["UserPromptSubmit"] = _without_tokengate(hooks.get("UserPromptSubmit", [])) + [
         {"hooks": [{"type": "command", "command": cmds["hook"], "timeout": 90,
                     "statusMessage": "tokengate: trying free models first"}]}]
+    stop = [] if caveman in ("off", "lite") else [{"hooks": [{"type": "command", "async": True, "timeout": 120,
+                                                             "command": cmds["stop"]}]}]
+    hooks["Stop"] = _without_tokengate(hooks.get("Stop", [])) + stop
     hooks["SessionStart"] = _without_tokengate(hooks.get("SessionStart", [])) + [
         {"hooks": [{"type": "command", "command": cmds["install"] + " || true", "timeout": 300}]}]
     servers = s.setdefault("enabledMcpjsonServers", [])
@@ -87,13 +92,15 @@ def install(root: Path) -> list[str]:
     settings_path.write_text(json.dumps(s, indent=2) + "\n", "utf-8")
     written.append(str(settings_path))
 
+    from .style import rule
+    policy = POLICY.replace(MARK_END, (f"- {rule(caveman)}\n" if rule(caveman) else "") + MARK_END)
     md = root / "CLAUDE.md"
     text = md.read_text("utf-8") if md.exists() else ""
     if MARK_START in text:
         a, b = text.index(MARK_START), text.index(MARK_END) + len(MARK_END)
-        text = text[:a] + POLICY.strip() + text[b:]
+        text = text[:a] + policy.strip() + text[b:]
     else:
-        text = (text.rstrip() + "\n\n" if text.strip() else "") + POLICY
+        text = (text.rstrip() + "\n\n" if text.strip() else "") + policy
     md.write_text(text, "utf-8")
     written.append(str(md))
     return written

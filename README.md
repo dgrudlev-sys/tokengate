@@ -39,6 +39,16 @@ Then restart Cursor once and enable **tokengate** under *Settings → MCP*. Done
   - **Fresh sessions:** the SessionStart hook installs tokengate from this repo, so the session must be able to reach it. Select it in the session, or make the repo public.
 - **Biggest Claude-side levers:** a cheaper model or lower effort for routine work (`/model`, `/effort`), `/compact` or `/clear` between tasks, and pasting text instead of screenshots.
 
+## Compressed replies (caveman) + free translation
+
+`caveman = "medium"` (default; also `lite`, `full`, `off`) adds a one-line style rule for Cursor and Claude Code: short plain sentences, no filler, code/paths/errors kept exact. Output tokens are the expensive ones and replies stay in the chat history, so this saves twice. Independent tests of caveman-style rules found about 12–23% less total output on coding work, because code itself isn't compressed.
+
+- `tokengate translate`: plain-English version of a terse reply (pipe it in, pass a file, or run with no input to show Claude Code's last translated reply).
+- Claude Code: an async Stop hook writes `.tokengate/last_reply.md` after each reply, translated by a free model.
+- `tokengate squeeze log.txt`: compresses pasted logs and specs with a free model before you send them (error lines, paths and numbers kept exact).
+
+Your own typed prompt can't be rewritten by a hook (neither Cursor nor Claude Code allows it), and it's a small part of input cost anyway.
+
 ## How Cursor is kept from going first
 
 Cursor's chat model normally reads every message *before* it decides to call a tool, so an MCP server alone can't stop that first spend. tokengate adds a **front door** using Cursor's `beforeSubmitPrompt` hook (`.cursor/hooks.json`):

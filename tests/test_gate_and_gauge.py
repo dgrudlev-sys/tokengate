@@ -212,3 +212,29 @@ def test_init_for_claude_writes_config(project):
     settings = json.loads((project / ".claude" / "settings.json").read_text())
     assert len(settings["hooks"]["UserPromptSubmit"]) == 1
     assert (project / "CLAUDE.md").read_text().count("tokengate:start") == 1
+
+
+# ---------------------------------------------------------------- caveman style
+def test_caveman_rule_lands_in_both_clients(project):
+    import json
+    from tokengate.cli import main
+    main(["init", str(project)])
+    assert "caveman-medium" in (project / ".cursor" / "rules" / "tokengate.mdc").read_text()
+    assert "caveman-medium" in (project / "CLAUDE.md").read_text()
+    stop = json.loads((project / ".claude" / "settings.json").read_text())["hooks"]["Stop"]
+    assert "tokengate.style" in json.dumps(stop) and stop[0]["hooks"][0]["async"] is True
+
+
+def test_translate_squeeze_and_stop_hook(project, fake_llm, tmp_path):
+    import json
+    from tokengate import style
+    FakeLLM.replies = {"m": "The bug was a missing empty-book check; it is fixed and tests pass."}
+    cfg = make_cfg(project, [Provider("nvidia", fake_llm, None, ["m"], rpm=100)])
+    assert "missing empty-book check" in style.translate(cfg, "Bug: no empty-book check. Fixed. Tests ✓.")
+    assert style.squeeze(make_cfg(project, []), "raw log") == "raw log"      # no free model: unchanged
+    tr = tmp_path / "t.jsonl"
+    tr.write_text("\n".join(json.dumps(e) for e in [
+        {"type": "user", "message": {"role": "user", "content": "fix it"}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Bug fixed."}]}},
+    ]))
+    assert style.last_assistant_text(tr) == "Bug fixed."
