@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from . import keys
 
 try:
     import tomllib  # py311+
@@ -31,15 +34,21 @@ class Provider:
     enabled: bool = True
     rpd: int = 0                  # requests per day we allow ourselves (0 = no cap)
     may_train: bool = False       # provider's free tier may train on prompts (your code)
+    pin_models: bool = False      # true: always use `models` as written, ignore `tokengate setup` picks
+
+    def __post_init__(self):
+        picked = None if self.pin_models else keys.models(self.name)
+        if picked:  # validated by `tokengate setup` against what the key can actually use
+            self.models = picked + [m for m in self.models if m not in picked]
 
     @property
     def api_key(self) -> str | None:
-        return os.environ.get(self.api_key_env) if self.api_key_env else None
+        return keys.get(self.api_key_env) if self.api_key_env else None
 
     @property
     def url(self) -> str:
-        """base_url with ${ENV} expanded (e.g. Cloudflare's account id)."""
-        return os.path.expandvars(self.base_url)
+        """base_url with ${VAR} filled from the environment or the tokengate key store."""
+        return re.sub(r"\$\{(\w+)\}", lambda m: keys.get(m.group(1)) or m.group(0), self.base_url)
 
     @property
     def available(self) -> bool:
@@ -105,6 +114,9 @@ class Config:
     gauge_reserve_pct: float = 85
     # Cursor beforeSubmitPrompt hook: "auto" | "always" | "off"
     prompt_gate: str = "auto"
+    # Pause once per Cursor chat after this many messages and suggest a fresh chat (0 = off).
+    # Every message re-sends the whole chat, so long chats are the biggest hidden cost.
+    long_chat_warn: int = 20
     # Providers whose free tier may train on your prompts that you accept: true / false / ["mistral"]
     allow_training: bool | list = False
 
@@ -134,11 +146,16 @@ def load(root: Path | None = None) -> Config:
     root = find_root(root)
     cfg = Config(root=root)
     path = root / "tokengate.toml"
-    if not (path.exists() and tomllib):
+    if not tomllib:
         return cfg
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    if path.exists():
+        text = path.read_text(encoding="utf-8")
+    else:  # no project config: use the shipped template so every provider is known
+        from importlib import resources
+        text = resources.files("tokengate").joinpath("templates", "tokengate.toml").read_text("utf-8")
+    data = tomllib.loads(text)
     for key in ("ignore", "extensions", "max_context_tokens", "pack_budget_tokens", "cache_ttl_days",
-                "gauge_warn_pct", "gauge_reserve_pct", "prompt_gate", "allow_training"):
+                "gauge_warn_pct", "gauge_reserve_pct", "prompt_gate", "allow_training", "long_chat_warn"):
         if key in data:
             setattr(cfg, key, data[key])
     if "providers" in data:

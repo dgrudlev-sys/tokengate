@@ -4,6 +4,24 @@
 
 ![gauge](docs/gauge-light.png)
 
+## Quick start (about 10 minutes)
+
+```bash
+pip install "tokengate[mcp] @ git+https://github.com/dgrudlev-sys/tokengate.git"
+cd your-project
+tokengate demo      # 1 min, offline: watch the whole pipeline on a sample project
+tokengate init      # wires Cursor (MCP, hook, rule, .cursorignore) + builds the call graph
+tokengate setup     # opens each free provider's key page, you paste, it validates + picks models
+tokengate doctor    # one screen: what works, and the fix for anything that doesn't
+```
+
+Then restart Cursor once and enable **tokengate** under *Settings → MCP*. Done.
+
+- **Keys** live in a per-user store (`%APPDATA%\tokengate\keys.env` on Windows), shared by all your projects. You don't need `setx`, environment variables or a Cursor restart when you add keys later.
+- **`tokengate setup`** checks each key live. A rejected key is caught right away and you can paste it again. It also picks the best coding models your key can actually use, so you never type model names.
+- **`tokengate cursor-byok`** prints the exact values for Cursor's *Override OpenAI Base URL*, using a provider that already works for you.
+- On Windows you can also run `scripts/install.ps1`; on Mac/Linux `scripts/install.sh`.
+
 ## How Cursor is kept from going first
 
 Cursor's chat model normally reads every message *before* it decides to call a tool, so an MCP server alone can't stop that first spend. tokengate adds a **front door** using Cursor's `beforeSubmitPrompt` hook (`.cursor/hooks.json`):
@@ -21,6 +39,7 @@ your message ──► tokengate hook ──► free model did it?  ── yes �
 - When the fuel gauge is in **reserve**, `auto` behaves like `always`.
 - Start a message with **`!`** to send it straight to Cursor.
 - The hook **fails open**: if it errors, your message goes to Cursor as usual.
+- **Long-chat guard:** every message re-sends the whole chat, so long chats are the biggest hidden cost. After `long_chat_warn` messages (default 20, halved in reserve), tokengate pauses **once** and suggests starting a new chat. Send the message again to continue.
 
 Inside Cursor's turn, the MCP tools and an `alwaysApply` rule keep it cheap: graph outlines instead of whole files, `delegate` for writing, and `run_checks` for verifying.
 
@@ -34,11 +53,11 @@ Inside Cursor's turn, the MCP tools and an `alwaysApply` rule keep it cheap: gra
 | 3 | Local model via Ollama (offline fallback) | free |
 | 4 | Cursor, handed a minimal context pack | paid, last |
 
-Free models can refuse with `ESCALATE: reason`. An edit is all-or-nothing (every `SEARCH` block must match exactly), and it is rolled back if typecheck or lint errors go up. Each failure moves on to the next model.
+A provider that failed 3 or more times in the last 30 minutes (and hasn't succeeded since) is tried last, so a down provider doesn't slow down every prompt. Free models can refuse with `ESCALATE: reason`. An edit is all-or-nothing (every `SEARCH` block must match exactly), and it is rolled back if typecheck or lint errors go up. Each failure moves on to the next model.
 
 ## Free API providers (pre-configured)
 
-Add a key and the provider joins the ladder. A provider with no key is skipped. They're tried in this order: strong and fast first, the small local model last. Limits are as reported in October 2026, and tokengate's defaults sit slightly under them. **Free tiers change often**, so check each console.
+Run `tokengate setup` (all recommended providers) or `tokengate setup groq mistral` (just those). Add a key and the provider joins the ladder. A provider with no key is skipped. They're tried in this order: strong and fast first, the small local model last. Limits are as reported in October 2026, and tokengate's defaults sit slightly under them. **Free tiers change often**, so check each console.
 
 | # | Provider | How to get a key | Effort | Free limits (approx.) | Env var |
 |---|---|---|---|---|---|
@@ -91,16 +110,9 @@ tokengate install-statusbar          # ▮▮▯▯▯ 28% in Cursor's status ba
 - **Levels**: `ok` → `warn` (≥ 60%, or the pace overshoots) → `reserve` (≥ 85%, or the pace is far over) → `empty`. Thresholds live in `tokengate.toml`. From `warn` upward, every tokengate tool output starts with a `[gauge …]` line telling Cursor's agent to economise.
 - **Free providers**: none of them expose remaining quota, so the gauge shows tokengate's own usage against each provider's caps.
 
-## Install
+## Install details
 
-```bash
-pip install "git+https://github.com/<you>/tokengate.git#egg=tokengate[mcp]"   # or: pip install -e ./tokengate[mcp]
-cd your-project
-tokengate init      # tokengate.toml, .cursor/{mcp.json,hooks.json,rules/tokengate.mdc}, .cursorignore, graphify graph
-tokengate models    # check model IDs per provider
-```
-
-Set the API keys you have as environment variables. On Windows: `setx NVIDIA_API_KEY "nvapi-..."`. Then restart Cursor and turn on **tokengate** under *Settings → MCP*. Run `tokengate init` on each machine, because it writes that machine's Python path into the Cursor configs.
+Install with `pip install "tokengate[mcp] @ git+https://github.com/dgrudlev-sys/tokengate.git"`, or `pip install -e ./tokengate[mcp]` from a local copy. Run `tokengate init` once per project on each machine, because it writes that machine's Python path into `.cursor/mcp.json`. API keys never go into project files.
 
 ## MCP tools
 
@@ -123,6 +135,7 @@ tokengate ask "explain the search pipeline" -k explain
 tokengate ask "add input validation to parseReference" -f Layer1_ReferenceParser.ts -k edit
 tokengate fanout "list bugs and a11y issues" "src/screens/**/*.tsx" -k review
 tokengate check | stats | gauge | dashboard
+tokengate setup | doctor | demo | cursor-byok
 ```
 
 ## Prior art (what to borrow next)

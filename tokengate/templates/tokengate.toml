@@ -20,6 +20,11 @@ gauge_reserve_pct = 85
 # Start a message with "!" to skip tokengate.
 prompt_gate = "always"
 
+# Long chats re-send their whole history on every message. After this many messages in one
+# Cursor chat, tokengate pauses once and suggests a fresh chat (resend to continue). 0 = off.
+# Halved automatically when the fuel gauge is in reserve.
+long_chat_warn = 20
+
 # Some free tiers may train on your prompts (= your code). List the ones you accept,
 # or true for all / false for none. Mistral's free tier is large, so it's allowed here.
 allow_training = ["mistral"]

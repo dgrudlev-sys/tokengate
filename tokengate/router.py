@@ -148,7 +148,7 @@ class Gate:
                 return res
 
         attempts = []
-        for prov in self.cfg.providers:
+        for prov in self._ordered_providers():
             client = Client(prov)
             if not client.usable:
                 attempts.append(f"{prov.name}: unavailable")
@@ -161,6 +161,7 @@ class Gate:
                     comp = client.chat(model, messages, max_tokens=max_tokens)
                 except ProviderError as e:
                     attempts.append(f"{prov.name}/{model}: {str(e)[:80]}")
+                    self.store.log("fail", prov.name, model, task=str(e)[:200])
                     if not client.usable:
                         break
                     continue
@@ -182,6 +183,14 @@ class Gate:
         self.store.log("escalate", task=task)
         return Result("escalate", "cursor", attempts=attempts,
                       context_pack=self.context_pack(task, targets or files))
+
+    def _ordered_providers(self):
+        """Config order, but providers failing repeatedly in the last 30 min go last (circuit breaker)."""
+        healthy, flaky = [], []
+        for p in self.cfg.providers:
+            ok, fail = self.store.health(p.name)
+            (flaky if fail >= 3 and ok == 0 else healthy).append(p)
+        return healthy + flaky
 
     # ------------------------------------------------------- validation
     def _accept(self, text: str, kind: str, apply: bool, verify: bool,

@@ -79,6 +79,16 @@ def test_parse_edits():
 class FakeLLM(BaseHTTPRequestHandler):
     replies: dict[str, object] = {}
     calls: list[str] = []
+    listed: list[str] = []
+    good_key = ""
+
+    def do_GET(self):
+        auth = self.headers.get("Authorization", "")
+        code = 401 if FakeLLM.good_key and auth != f"Bearer {FakeLLM.good_key}" else 200
+        body = json.dumps({"data": [{"id": m} for m in FakeLLM.listed]}).encode()
+        self.send_response(code)
+        self.end_headers()
+        self.wfile.write(body if code == 200 else b"{}")
 
     def log_message(self, *a):
         pass
@@ -105,6 +115,7 @@ def fake_llm():
     srv = HTTPServer(("127.0.0.1", 0), FakeLLM)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     FakeLLM.calls = []
+    FakeLLM.listed, FakeLLM.good_key = [], ""
     Client._dead_models.clear()
     Client._down_until.clear()
     Client._limiters.clear()

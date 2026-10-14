@@ -5,17 +5,46 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
 
+class _LockedConnection:
+    """One sqlite connection shared by worker threads (distribute); serialise every call."""
+
+    def __init__(self, con: sqlite3.Connection):
+        self._con, self._lock = con, threading.RLock()
+
+    def execute(self, *a):
+        with self._lock:
+            return _Rows(self._con.execute(*a).fetchall())
+
+    def executescript(self, sql):
+        with self._lock:
+            return self._con.executescript(sql)
+
+    def commit(self):
+        with self._lock:
+            self._con.commit()
+
+
+class _Rows(list):
+    def fetchone(self):
+        return self[0] if self else None
+
+    def fetchall(self):
+        return list(self)
+
+
 class Store:
     def __init__(self, state_dir: Path, ttl_days: int = 30):
-        self.db = sqlite3.connect(state_dir / "cache.sqlite", check_same_thread=False)
+        self.db = _LockedConnection(sqlite3.connect(state_dir / "cache.sqlite", check_same_thread=False))
         self.ttl = ttl_days * 86400
         self.db.executescript(
             """
             CREATE TABLE IF NOT EXISTS answers(key TEXT PRIMARY KEY, created REAL, provider TEXT, model TEXT, body TEXT);
+            CREATE TABLE IF NOT EXISTS convo(id TEXT PRIMARY KEY, turns INT, warned INT, updated REAL);
             CREATE TABLE IF NOT EXISTS ledger(ts REAL, tier TEXT, provider TEXT, model TEXT,
                                               tokens_in INT, tokens_out INT, cursor_tokens_avoided INT, task TEXT);
             """
@@ -44,6 +73,26 @@ class Store:
     def requests_today(self, provider: str) -> int:
         return self.db.execute("SELECT COUNT(*) FROM ledger WHERE provider=? AND tier!='cache' AND ts>?",
                                (provider, time.time() - 86400)).fetchone()[0]
+
+    def health(self, provider: str, minutes: int = 30) -> tuple[int, int]:
+        """(successes, failures) for a provider in the last `minutes`."""
+        rows = self.db.execute("SELECT tier='fail', COUNT(*) FROM ledger WHERE provider=? AND ts>? "
+                               "AND tier NOT IN ('cache','escalate','graph') GROUP BY tier='fail'",
+                               (provider, time.time() - minutes * 60)).fetchall()
+        d = dict(rows)
+        return d.get(0, 0), d.get(1, 0)
+
+    def chat_turn(self, conversation_id: str) -> tuple[int, bool]:
+        """Count a prompt in a Cursor conversation -> (turns so far, already warned)."""
+        row = self.db.execute("SELECT turns, warned FROM convo WHERE id=?", (conversation_id,)).fetchone()
+        turns, warned = (row[0] + 1, bool(row[1])) if row else (1, False)
+        self.db.execute("INSERT OR REPLACE INTO convo VALUES(?,?,?,?)", (conversation_id, turns, int(warned), time.time()))
+        self.db.commit()
+        return turns, warned
+
+    def mark_warned(self, conversation_id: str) -> None:
+        self.db.execute("UPDATE convo SET warned=1 WHERE id=?", (conversation_id,))
+        self.db.commit()
 
     def stats(self, days: int = 30) -> dict:
         since = time.time() - days * 86400

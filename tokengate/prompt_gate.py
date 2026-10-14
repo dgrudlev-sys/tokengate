@@ -107,6 +107,17 @@ def handle(payload: dict) -> dict:
         level = gauge.read(cfg, store).level
     except Exception:
         pass
+    conv = payload.get("conversation_id")
+    if conv and cfg.long_chat_warn and not prompt.strip().startswith("!"):
+        limit = cfg.long_chat_warn // 2 if level in ("reserve", "empty") else cfg.long_chat_warn
+        turns, warned = store.chat_turn(conv)
+        if turns >= limit and not warned:
+            store.mark_warned(conv)
+            return {"continue": False, "user_message":
+                    f"This chat has {turns} messages, and every new message re-sends all of them. "
+                    "Start a new chat (Ctrl/Cmd+N) with a one-line summary to save tokens. "
+                    "To keep going here anyway, just send your message again."}
+
     graph = Graph(cfg).load()
     graph.build()
     files = mentioned_files(prompt, payload.get("attachments"), graph)

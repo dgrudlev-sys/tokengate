@@ -13,6 +13,10 @@
   tokengate gauge [--set PCT] [--json]   Cursor fuel gauge (burn rate, runs-out date)
   tokengate dashboard [--port 8765]      local gauge dashboard in the browser
   tokengate install-statusbar            fuel gauge in Cursor's status bar
+  tokengate setup [PROVIDER..]           guided free-API sign-up: open page, paste key, validated
+  tokengate doctor [--offline]           check everything, with the fix for each problem
+  tokengate demo                         offline end-to-end tour with a scripted model
+  tokengate cursor-byok                  exact settings to run Cursor's chat on a free provider
   tokengate serve                   run the MCP server (Cursor starts this for you)
 """
 
@@ -53,7 +57,7 @@ def cmd_init(args) -> None:
     data.setdefault("mcpServers", {})["tokengate"] = {
         "command": sys.executable,
         "args": ["-m", "tokengate.mcp_server"],
-        "env": {"TOKENGATE_ROOT": "${workspaceFolder}", "NVIDIA_API_KEY": "${env:NVIDIA_API_KEY}"},
+        "env": {"TOKENGATE_ROOT": "${workspaceFolder}"},  # API keys come from the tokengate key store
     }
     mcp_path.write_text(json.dumps(data, indent=2) + "\n", "utf-8")
     print(f"wrote {mcp_path}")
@@ -87,8 +91,12 @@ def cmd_init(args) -> None:
         print(f"{k}: {v}")
     if not shutil.which("rg"):
         print("tip: install ripgrep (rg) for faster search")
-    print("\nNext: add API keys for the free providers you sign up to (README: 'Free API providers'),\n"
-          "run `tokengate models`, restart Cursor and enable 'tokengate' under Settings > MCP.")
+    from .setup_wizard import status_rows
+    ready = sum(1 for _, st, _ in status_rows(cfg) if st == "key saved")
+    if ready == 0 and sys.stdin.isatty() and input("\nNo free providers set up yet. Do it now (~5 min)? [Y/n] ").strip().lower() not in ("n", "no"):
+        from .setup_wizard import run as setup
+        setup(cfg)
+    print("\nNext: restart Cursor, enable 'tokengate' under Settings > MCP, then run `tokengate doctor`.")
 
 
 def cmd_install_statusbar() -> None:
@@ -122,7 +130,15 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--refresh", action="store_true")
     p = sub.add_parser("dashboard"); p.add_argument("--port", type=int, default=8765)
     sub.add_parser("install-statusbar")
+    p = sub.add_parser("setup"); p.add_argument("providers", nargs="*"); p.add_argument("-y", "--yes", action="store_true")
+    p = sub.add_parser("doctor"); p.add_argument("--offline", action="store_true", help="don't call provider APIs")
+    sub.add_parser("demo")
+    sub.add_parser("cursor-byok")
     args = ap.parse_args(argv)
+
+    if args.cmd == "demo":
+        from .demo import run as demo
+        sys.exit(demo())
 
     if args.cmd == "install-statusbar":
         return cmd_install_statusbar()
@@ -139,6 +155,17 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.cmd == "check":
         print(json.dumps(local_tools.run_checks(cfg), indent=2))
+        return
+    if args.cmd == "setup":
+        from .setup_wizard import run as setup
+        return setup(cfg, args.providers or None, args.yes)
+    if args.cmd == "doctor":
+        from .doctor import report
+        print(report(cfg, live=not args.offline))
+        return
+    if args.cmd == "cursor-byok":
+        from .setup_wizard import byok_instructions
+        print(byok_instructions(cfg))
         return
     if args.cmd == "gauge":
         from . import gauge
