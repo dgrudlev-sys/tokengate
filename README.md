@@ -22,6 +22,23 @@ Then restart Cursor once and enable **tokengate** under *Settings → MCP*. Done
 - **`tokengate cursor-byok`** prints the exact values for Cursor's *Override OpenAI Base URL*, using a provider that already works for you.
 - On Windows you can also run `scripts/install.ps1`; on Mac/Linux `scripts/install.sh`.
 
+## Claude Code
+
+`tokengate init` sets up **Claude Code** too (`--for claude` for Claude Code only, `--for cursor` for Cursor only):
+
+| File | What it does |
+|---|---|
+| `.mcp.json` | Adds the same 5 tokengate tools (`code`, `delegate`, `distribute`, `check`, `gauge_status`). |
+| `.claude/settings.json` | **Prompt hook** (`UserPromptSubmit`): free models try first. If one answers, the prompt is blocked and the answer is shown to you (0 Claude tokens). If none can, the context already gathered is handed to Claude, so it doesn't re-explore. Prompts that rely on chat history, and prompts with images (`[Image #1]`), go straight to Claude. Also a **SessionStart** hook that installs tokengate in fresh cloud containers, and read-denials for token sinks (`node_modules`, lockfiles). |
+| `CLAUDE.md` | A ~100-token policy block (loaded every session, so kept tiny). |
+
+- **Long-chat guard:** in Claude Code it suggests `/compact` (keeps a summary) or `/clear`.
+- **claude.ai/code cloud sessions:**
+  - **Network access:** the free providers need it. In the cloud environment's settings (environment menu → Edit → Network access), allow `api.groq.com`, `integrate.api.nvidia.com`, `api.mistral.ai`, `openrouter.ai` (and any others you use).
+  - **API keys:** add them as environment variables there (`GROQ_API_KEY`, etc.). Never paste keys into chat.
+  - **Fresh sessions:** the SessionStart hook installs tokengate from this repo, so the session must be able to reach it. Select it in the session, or make the repo public.
+- **Biggest Claude-side levers:** a cheaper model or lower effort for routine work (`/model`, `/effort`), `/compact` or `/clear` between tasks, and pasting text instead of screenshots.
+
 ## How Cursor is kept from going first
 
 Cursor's chat model normally reads every message *before* it decides to call a tool, so an MCP server alone can't stop that first spend. tokengate adds a **front door** using Cursor's `beforeSubmitPrompt` hook (`.cursor/hooks.json`):

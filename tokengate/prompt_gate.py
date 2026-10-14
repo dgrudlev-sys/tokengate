@@ -78,7 +78,7 @@ def image_reason(prompt: str, attachments) -> str | None:
                 return "image attached"
         elif isinstance(a, str) and IMAGE_EXT.search(a):
             return "image attached"
-    if IMAGE_EXT.search(prompt) or IMAGE_WORDS.search(prompt):
+    if IMAGE_EXT.search(prompt) or IMAGE_WORDS.search(prompt) or re.search(r"\[Image #?\d+\]", prompt):
         return "prompt refers to an image"
     return None
 
@@ -112,31 +112,51 @@ def _open_in_editor(path: Path) -> None:
 
 
 def handle(payload: dict) -> dict:
+    """Run the gate for one prompt. Accepts Cursor's or Claude Code's hook payload and
+    answers in the same client's format."""
+    claude = "hook_event_name" in payload or "transcript_path" in payload
+    out = _run(payload, claude)
+    if not claude:
+        r = {"continue": out["continue"]}
+        if out.get("message"):
+            r["user_message"] = out["message"]
+        return r
+    if not out["continue"]:
+        return {"decision": "block", "reason": out["message"]}
+    if out.get("context"):
+        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": out["context"]}}
+    return {}
+
+
+def _run(payload: dict, claude: bool) -> dict:
     from . import config, gauge
     from .cache import Store
     from .graph import Graph
     from .router import Gate
 
+    host = "Claude" if claude else "Cursor"
     prompt = payload.get("prompt") or ""
-    roots = payload.get("workspace_roots") or []
+    roots = [payload["cwd"]] if claude and payload.get("cwd") else (payload.get("workspace_roots") or [])
     cfg = config.load(Path(roots[0]) if roots else None)
     store = Store(cfg.state_dir, cfg.cache_ttl_days)
     log = cfg.state_dir / "hook.log"
+    passthrough = {"continue": True}
 
     level = "unknown"
     try:
         level = gauge.read(cfg, store).level
     except Exception:
         pass
-    conv = payload.get("conversation_id")
+    conv = payload.get("session_id") if claude else payload.get("conversation_id")
     if conv and cfg.long_chat_warn and not prompt.strip().startswith("!"):
         limit = cfg.long_chat_warn // 2 if level in ("reserve", "empty") else cfg.long_chat_warn
         turns, warned = store.chat_turn(conv)
         if turns >= limit and not warned:
             store.mark_warned(conv)
-            return {"continue": False, "user_message":
-                    f"This chat has {turns} messages, and every new message re-sends all of them. "
-                    "Start a new chat (Ctrl/Cmd+N) with a one-line summary to save tokens. "
+            fresh = ("Run /compact (keeps a summary) or /clear (fresh start) to save tokens."
+                     if claude else "Start a new chat (Ctrl/Cmd+N) with a one-line summary to save tokens.")
+            return {"continue": False, "message":
+                    f"This chat has {turns} messages, and every new message re-sends all of them. {fresh} "
                     "To keep going here anyway, just send your message again."}
 
     why_image = image_reason(prompt, payload.get("attachments"))
@@ -144,36 +164,40 @@ def handle(payload: dict) -> dict:
         with log.open("a", encoding="utf-8") as fh:
             fh.write(f"{time.strftime('%H:%M:%S')} go=False ({why_image}; text-only free models can't see it) "
                      f":: {prompt[:120]!r}\n")
-        return {"continue": True}
+        return passthrough
 
     graph = Graph(cfg).load()
     graph.build()
     files = mentioned_files(prompt, payload.get("attachments"), graph)
     go, kind, reason = decide(prompt, cfg.prompt_gate, level, files)
     with log.open("a", encoding="utf-8") as fh:
-        fh.write(f"{time.strftime('%H:%M:%S')} go={go} kind={kind} files={files} ({reason}) :: {prompt[:120]!r}\n")
+        fh.write(f"{time.strftime('%H:%M:%S')} [{host}] go={go} kind={kind} files={files} ({reason}) :: {prompt[:120]!r}\n")
     if not go:
-        return {"continue": True}
+        return passthrough
 
     gate = Gate(cfg, graph, store)
     res = gate.delegate(prompt, files or None, kind)
     if res.status == "done":
         answer = cfg.state_dir / "last_answer.md"
-        answer.write_text(f"# {prompt.strip()}\n\n_{res.provider}/{res.model} via tokengate, 0 Cursor tokens_\n\n"
+        answer.write_text(f"# {prompt.strip()}\n\n_{res.provider}/{res.model} via tokengate, 0 {host} tokens_\n\n"
                           + res.render(), "utf-8")
-        _open_in_editor(answer)
-        head = f"✅ Answered by {res.provider}/{res.model} (0 Cursor tokens)."
+        if not claude:
+            _open_in_editor(answer)
+        head = f"✅ Answered by {res.provider}/{res.model} (0 {host} tokens)."
         if res.files_changed:
             head += " Edited: " + ", ".join(res.files_changed) + " — review with git diff."
         body = res.text if len(res.text) < 1500 else res.text[:1500] + "…"
-        return {"continue": False,
-                "user_message": f"{head}\nFull answer: .tokengate/last_answer.md\n\n{body}\n\n(Start with '!' to send to Cursor instead.)"}
+        return {"continue": False, "message": f"{head}\nFull answer: .tokengate/last_answer.md\n\n{body}\n\n"
+                                              f"(Start with '!' to send to {host} instead.)"}
 
-    handoff = cfg.state_dir / "HANDOFF.md"
-    handoff.write_text(f"# Handoff from tokengate\nprompt: {prompt.strip()}\nwritten: {time.time():.0f}\n\n"
-                       f"Free models could not finish ({'; '.join(res.attempts)[:500]}).\n\n"
-                       f"Relevant context (already gathered, don't re-explore):\n\n{res.context_pack}\n", "utf-8")
-    return {"continue": True}
+    handoff = (f"# Handoff from tokengate\nprompt: {prompt.strip()}\nwritten: {time.time():.0f}\n\n"
+               f"Free models could not finish ({'; '.join(res.attempts)[:500]}).\n\n"
+               f"Relevant context (already gathered, don't re-explore):\n\n{res.context_pack}\n")
+    (cfg.state_dir / "HANDOFF.md").write_text(handoff, "utf-8")
+    if claude and files:  # Claude Code lets the hook hand this to the model; only when the prompt names code
+        return {"continue": True, "context": "tokengate already gathered this context; start from it instead of "
+                                             "exploring:\n" + res.context_pack}
+    return passthrough
 
 
 def main() -> None:
@@ -181,7 +205,7 @@ def main() -> None:
         payload = json.loads(sys.stdin.read() or "{}")
         out = handle(payload)
     except Exception as e:  # fail open
-        out = {"continue": True}
+        out = {}
         try:
             (Path.cwd() / ".tokengate" / "hook.log").open("a").write(f"error: {e!r}\n")
         except OSError:

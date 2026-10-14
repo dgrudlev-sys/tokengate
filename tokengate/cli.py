@@ -41,40 +41,48 @@ def _template(name: str) -> str:
 
 def cmd_init(args) -> None:
     root = Path(args.project or ".").resolve()
-    (root / ".cursor" / "rules").mkdir(parents=True, exist_ok=True)
 
     toml = root / "tokengate.toml"
     if not toml.exists():
         toml.write_text(_template("tokengate.toml"), "utf-8")
         print(f"wrote {toml}")
 
-    rule = root / ".cursor" / "rules" / "tokengate.mdc"
-    rule.write_text(_template("tokengate.mdc"), "utf-8")
-    print(f"wrote {rule}")
+    if "cursor" in args.targets:
+        (root / ".cursor" / "rules").mkdir(parents=True, exist_ok=True)
+        rule = root / ".cursor" / "rules" / "tokengate.mdc"
+        rule.write_text(_template("tokengate.mdc"), "utf-8")
+        print(f"wrote {rule}")
 
-    mcp_path = root / ".cursor" / "mcp.json"
-    data = json.loads(mcp_path.read_text("utf-8")) if mcp_path.exists() else {}
-    data.setdefault("mcpServers", {})["tokengate"] = {
-        "command": sys.executable,
-        "args": ["-m", "tokengate.mcp_server"],
-        "env": {"TOKENGATE_ROOT": "${workspaceFolder}"},  # API keys come from the tokengate key store
-    }
-    mcp_path.write_text(json.dumps(data, indent=2) + "\n", "utf-8")
-    print(f"wrote {mcp_path}")
+        mcp_path = root / ".cursor" / "mcp.json"
+        data = json.loads(mcp_path.read_text("utf-8")) if mcp_path.exists() else {}
+        data.setdefault("mcpServers", {})["tokengate"] = {
+            "command": sys.executable,
+            "args": ["-m", "tokengate.mcp_server"],
+            "env": {"TOKENGATE_ROOT": "${workspaceFolder}"},  # API keys come from the tokengate key store
+        }
+        mcp_path.write_text(json.dumps(data, indent=2) + "\n", "utf-8")
+        print(f"wrote {mcp_path}")
 
-    # Front door: tokengate sees each chat prompt before Cursor's model does.
-    hooks_path = root / ".cursor" / "hooks.json"
-    hooks = json.loads(hooks_path.read_text("utf-8")) if hooks_path.exists() else {}
-    hooks.setdefault("version", 1)
-    entries = [h for h in hooks.setdefault("hooks", {}).get("beforeSubmitPrompt", [])
-               if "tokengate.prompt_gate" not in h.get("command", "")]
-    entries.append({"command": f'"{sys.executable}" -m tokengate.prompt_gate'})
-    hooks["hooks"]["beforeSubmitPrompt"] = entries
-    hooks_path.write_text(json.dumps(hooks, indent=2) + "\n", "utf-8")
-    print(f"wrote {hooks_path}")
+        # Front door: tokengate sees each chat prompt before Cursor's model does.
+        hooks_path = root / ".cursor" / "hooks.json"
+        hooks = json.loads(hooks_path.read_text("utf-8")) if hooks_path.exists() else {}
+        hooks.setdefault("version", 1)
+        entries = [h for h in hooks.setdefault("hooks", {}).get("beforeSubmitPrompt", [])
+                   if "tokengate.prompt_gate" not in h.get("command", "")]
+        entries.append({"command": f'"{sys.executable}" -m tokengate.prompt_gate'})
+        hooks["hooks"]["beforeSubmitPrompt"] = entries
+        hooks_path.write_text(json.dumps(hooks, indent=2) + "\n", "utf-8")
+        print(f"wrote {hooks_path}")
 
-    for target, lines in ((root / ".cursorignore", _template("cursorignore").splitlines() + [".graphifyignore"]),
-                          (root / ".gitignore", [".tokengate/"])):
+    if "claude" in args.targets:
+        from .claude_code import install as claude_install
+        for path in claude_install(root):
+            print(f"wrote {path} (Claude Code)")
+
+    ignores = [(root / ".gitignore", [".tokengate/"])]
+    if "cursor" in args.targets:
+        ignores.append((root / ".cursorignore", _template("cursorignore").splitlines() + [".graphifyignore"]))
+    for target, lines in ignores:
         existing = target.read_text("utf-8").splitlines() if target.exists() else []
         missing = [l for l in lines if l not in existing]
         if missing:
@@ -113,6 +121,7 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="tokengate", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("init"); p.add_argument("project", nargs="?")
+    p.add_argument("--for", dest="targets", default="cursor,claude", help="cursor, claude, or both (default)")
     sub.add_parser("index")
     sub.add_parser("viz")
     p = sub.add_parser("query"); p.add_argument("what", choices=["map", "file", "find", "explain", "impact", "path", "hubs", "pack", "search"])

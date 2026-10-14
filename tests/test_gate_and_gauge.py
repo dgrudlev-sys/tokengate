@@ -159,3 +159,56 @@ def test_image_prompts_go_to_cursor(project, fake_llm, monkeypatch):
         assert prompt_gate.handle({**payload, "workspace_roots": root}) == {"continue": True}, payload
     assert FakeLLM.calls == []                       # no free model was asked to answer blind
     assert prompt_gate.image_reason("explain what add does in math.ts", [{"file_path": "src/lib/math.ts"}]) is None
+
+
+# ---------------------------------------------------------------- Claude Code
+def _claude(prompt, project, **kw):
+    return {"hook_event_name": "UserPromptSubmit", "session_id": kw.get("sid", "s1"),
+            "transcript_path": "/tmp/t.jsonl", "cwd": str(project), "prompt": prompt}
+
+
+def test_claude_hook_blocks_when_free_model_answers(project, fake_llm, monkeypatch):
+    FakeLLM.replies = {"m": "add() returns the sum of its two arguments."}
+    (project / "tokengate.toml").write_text(
+        f'[[providers]]\nname = "nvidia"\nbase_url = "{fake_llm}"\nmodels = ["m"]\nrpm = 100\n')
+    monkeypatch.setattr(cursor_usage, "fetch", lambda: cursor_usage.CursorUsage(None, source="unavailable"))
+    out = prompt_gate.handle(_claude("explain what add does in math.ts", project))
+    assert out["decision"] == "block" and "0 Claude tokens" in out["reason"]
+
+
+def test_claude_hook_injects_context_on_escalation(project, fake_llm, monkeypatch):
+    FakeLLM.replies = {"m": "ESCALATE: too hard"}
+    (project / "tokengate.toml").write_text(
+        f'[[providers]]\nname = "nvidia"\nbase_url = "{fake_llm}"\nmodels = ["m"]\nrpm = 100\n')
+    monkeypatch.setattr(cursor_usage, "fetch", lambda: cursor_usage.CursorUsage(None, source="unavailable"))
+    out = prompt_gate.handle(_claude("explain what add does in math.ts", project))
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert out["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit" and "export function add" in ctx
+    # history-dependent and image prompts pass straight through with no output
+    assert prompt_gate.handle(_claude("yes do it", project)) == {}
+    assert prompt_gate.handle(_claude("fix this [Image #1] in app.tsx please", project)) == {}
+
+
+def test_claude_long_chat_guard_suggests_compact(project, monkeypatch):
+    (project / "tokengate.toml").write_text('long_chat_warn = 2\nproviders = []\n')
+    monkeypatch.setattr(cursor_usage, "fetch", lambda: cursor_usage.CursorUsage(None, source="unavailable"))
+    prompt_gate.handle(_claude("ok", project, sid="x"))
+    out = prompt_gate.handle(_claude("ok again", project, sid="x"))
+    assert out["decision"] == "block" and "/compact" in out["reason"]
+
+
+def test_init_for_claude_writes_config(project):
+    import json
+    from tokengate.cli import main
+    main(["init", str(project), "--for", "claude"])
+    mcp = json.loads((project / ".mcp.json").read_text())
+    assert "tokengate" in mcp["mcpServers"]
+    settings = json.loads((project / ".claude" / "settings.json").read_text())
+    assert "tokengate.prompt_gate" in json.dumps(settings["hooks"]["UserPromptSubmit"])
+    assert "tokengate" in settings["enabledMcpjsonServers"]
+    assert "tokengate:start" in (project / "CLAUDE.md").read_text()
+    assert not (project / ".cursor").exists()
+    main(["init", str(project), "--for", "claude"])          # idempotent: no duplicate hooks
+    settings = json.loads((project / ".claude" / "settings.json").read_text())
+    assert len(settings["hooks"]["UserPromptSubmit"]) == 1
+    assert (project / "CLAUDE.md").read_text().count("tokengate:start") == 1
