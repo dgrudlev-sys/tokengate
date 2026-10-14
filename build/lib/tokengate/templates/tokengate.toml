@@ -1,0 +1,122 @@
+# tokengate configuration. Providers are tried top to bottom; Cursor is the implicit last resort.
+
+# Directories never indexed (also put them in .cursorignore so Cursor doesn't index them either)
+ignore = ["node_modules", ".git", ".expo", "android", "ios", "build", "dist", "__pycache__", ".venv", ".tokengate", "coverage", "Pods"]
+extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sql"]
+
+max_context_tokens = 12000   # cap on context sent to a free model per call
+pack_budget_tokens = 2500    # cap on context packs returned to Cursor
+cache_ttl_days = 30
+
+# Gas gauge: % of Cursor's included usage at which tokengate warns / enters reserve mode
+gauge_warn_pct = 60
+gauge_reserve_pct = 85
+
+# Front door: Cursor's beforeSubmitPrompt hook sends your chat message to tokengate FIRST.
+#   "always" every self-contained message (Cursor only runs if free models escalate)  <- max savings
+#   "auto"   only explain / review / tests / docs / small named-file edits
+#   "off"    hook does nothing
+# Messages that rely on chat history ("yes do it", "fix the error above") always go to Cursor.
+# Start a message with "!" to skip tokengate.
+prompt_gate = "always"
+
+# Long chats re-send their whole history on every message. After this many messages in one
+# Cursor chat, tokengate pauses once and suggests a fresh chat (resend to continue). 0 = off.
+# Halved automatically when the fuel gauge is in reserve.
+long_chat_warn = 20
+
+# Some free tiers may train on your prompts (= your code). List the ones you accept,
+# or true for all / false for none. Mistral's free tier is large, so it's allowed here.
+allow_training = ["mistral"]
+
+# ---------------------------------------------------------------------------------------------
+# Free providers, tried top to bottom: strong + fast first, small local model last (offline
+# fallback). A provider without its key (or env vars in base_url) is skipped silently.
+# Limits are set a little under each free tier as reported in October 2026; free tiers change
+# often. `tokengate models` lists the real model IDs each key can use: put the best first.
+# ---------------------------------------------------------------------------------------------
+
+[[providers]]
+name = "groq"                         # console.groq.com: email signup, no card. ~30 RPM, ~1,000 req/day/model
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+models = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
+rpm = 25
+rpd = 900
+max_parallel = 3
+
+[[providers]]
+name = "nvidia"                       # build.nvidia.com: NVIDIA Developer Program signup. ~40 RPM
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_API_KEY"
+models = ["qwen/qwen2.5-coder-32b-instruct", "meta/llama-3.3-70b-instruct", "mistralai/mixtral-8x22b-instruct-v0.1"]
+rpm = 35
+max_parallel = 4
+
+[[providers]]
+name = "mistral"                      # console.mistral.ai: free plan, phone verification, no card. Codestral
+base_url = "https://api.mistral.ai/v1"
+api_key_env = "MISTRAL_API_KEY"
+models = ["codestral-latest", "mistral-medium-latest", "mistral-small-latest"]
+rpm = 20                              # ~1 request/second reported; kept below
+max_parallel = 1
+may_train = true                      # free-plan prompts may train Mistral models (allowed above)
+
+[[providers]]
+name = "cerebras"                     # cloud.cerebras.ai: email signup. Free limits reported inconsistently
+base_url = "https://api.cerebras.ai/v1"
+api_key_env = "CEREBRAS_API_KEY"
+models = ["gpt-oss-120b", "llama-3.3-70b"]
+rpm = 5
+max_parallel = 1
+
+[[providers]]
+name = "ollama_cloud"                 # ollama.com account -> API key. Session/weekly limits, amounts unpublished
+base_url = "https://ollama.com/v1"
+api_key_env = "OLLAMA_API_KEY"
+models = ["gpt-oss:120b", "qwen3-coder:480b"]
+rpm = 10
+max_parallel = 1
+
+[[providers]]
+name = "cloudflare"                   # dash.cloudflare.com: free account, no card. 10,000 Neurons/day
+base_url = "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1"
+api_key_env = "CLOUDFLARE_API_TOKEN"
+models = ["@cf/qwen/qwen2.5-coder-32b-instruct", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"]
+rpm = 20
+max_parallel = 2
+
+[[providers]]
+name = "openrouter"                   # openrouter.ai: email signup. `:free` models 20 RPM, 50/day (1,000/day after a one-time $10)
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+models = ["qwen/qwen3-coder:free", "deepseek/deepseek-chat-v3.1:free"]
+rpm = 15
+rpd = 45
+max_parallel = 2
+
+[[providers]]
+name = "gemini"                       # aistudio.google.com: Google account, no card. Limits shown only in AI Studio
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+api_key_env = "GEMINI_API_KEY"
+models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+rpm = 8
+rpd = 200
+max_parallel = 2
+may_train = true                      # add "gemini" to allow_training to use it (EEA/UK/CH users excepted)
+
+[[providers]]
+name = "huggingface"                  # huggingface.co token. Only ~$0.10/month of credits: last resort
+base_url = "https://router.huggingface.co/v1"
+api_key_env = "HF_TOKEN"
+models = ["Qwen/Qwen2.5-Coder-32B-Instruct"]
+rpm = 5
+rpd = 20
+max_parallel = 1
+
+[[providers]]
+name = "ollama"                       # local, private, unlimited, works offline; skipped if not running
+base_url = "http://localhost:11434/v1"
+models = ["qwen2.5-coder:7b"]
+rpm = 600
+max_parallel = 1

@@ -1,0 +1,11 @@
+---
+description: Quota policy (tokengate)
+alwaysApply: true
+---
+Paid quota is scarce. Free tools first:
+- If `.tokengate/HANDOFF.md` matches this prompt, use it; don't re-explore.
+- Explore via `code` (map/file/find/explain/impact/pack/search), then read only needed line ranges. Never open whole large files.
+- Edits, tests, docs, reviews, explanations: `delegate` first; do it yourself only on status=escalate. Done edits are on disk: don't rewrite them.
+- Many files: `distribute`. Verify with `check`, not by re-reading.
+- `[gauge WARN|RESERVE|EMPTY]` in output: delegate everything, reply in a few lines.
+- Terse answers. No restating unchanged code. Small diffs, never full-file rewrites.

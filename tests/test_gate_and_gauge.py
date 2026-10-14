@@ -142,3 +142,20 @@ def test_explorer_with_graphify(project):
     assert "app.tsx" in ex.run("impact", "add()")
     assert "export function add" in ex.run("file", "math.ts")
     assert "unknown op" in ex.run("nope")
+
+
+def test_image_prompts_go_to_cursor(project, fake_llm, monkeypatch):
+    FakeLLM.replies = {"m": "a confident answer that never saw the image"}
+    (project / "tokengate.toml").write_text(
+        f'[[providers]]\nname = "nvidia"\nbase_url = "{fake_llm}"\nmodels = ["m"]\nrpm = 100\n')
+    monkeypatch.setattr(cursor_usage, "fetch", lambda: cursor_usage.CursorUsage(None, source="unavailable"))
+    root = [str(project)]
+    for payload in (
+        {"prompt": "make the header in app.tsx match this layout", "attachments": [{"type": "image", "file_path": "/tmp/x.png"}]},
+        {"prompt": "make the header in app.tsx match this layout", "attachments": [{"file_path": "C:/Users/me/shot.PNG"}]},
+        {"prompt": "fix the bug shown in the screenshot in app.tsx please"},
+        {"prompt": "use assets/logo.png as the header icon in app.tsx"},
+    ):
+        assert prompt_gate.handle({**payload, "workspace_roots": root}) == {"continue": True}, payload
+    assert FakeLLM.calls == []                       # no free model was asked to answer blind
+    assert prompt_gate.image_reason("explain what add does in math.ts", [{"file_path": "src/lib/math.ts"}]) is None

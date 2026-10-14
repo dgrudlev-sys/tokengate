@@ -39,6 +39,7 @@ your message ──► tokengate hook ──► free model did it?  ── yes �
 - When the fuel gauge is in **reserve**, `auto` behaves like `always`.
 - Start a message with **`!`** to send it straight to Cursor.
 - The hook **fails open**: if it errors, your message goes to Cursor as usual.
+- **Images go to Cursor.** The free models are text-only, so if a message has an image attached, or mentions a screenshot or an image file, the hook steps aside rather than letting a model answer blind.
 - **Long-chat guard:** every message re-sends the whole chat, so long chats are the biggest hidden cost. After `long_chat_warn` messages (default 20, halved in reserve), tokengate pauses **once** and suggests starting a new chat. Send the message again to continue.
 
 Inside Cursor's turn, the MCP tools and an `alwaysApply` rule keep it cheap: graph outlines instead of whole files, `delegate` for writing, and `run_checks` for verifying.
@@ -92,7 +93,8 @@ tokengate cuts what Cursor *reads* and *writes*. These Cursor settings decide wh
 2. **Use Auto** for routine work. Avoid manually picking premium, *MAX* or "thinking" models; they burn the pool fastest.
 3. **Start a new chat per task.** Every message re-sends the whole conversation, so a long chat costs more on each turn.
 4. **Set a spend limit** (Dashboard → Spending) so Cursor doesn't silently switch to paid on-demand usage when the pool runs out.
-5. **Keep `.cursorignore` tight.** `tokengate init` adds `node_modules`, `android/`, `ios/`, lockfiles and media.
+5. **Go easy on screenshots.** A pasted screenshot costs roughly 1,000–2,000 tokens, and it's re-sent with **every later message in that chat**. Paste error messages as text (often 10x cheaper), crop to the relevant part, and start a new chat once the visual question is answered.
+6. **Keep `.cursorignore` tight.** `tokengate init` adds `node_modules`, `android/`, `ios/`, lockfiles and media.
 
 Measured on this project, tokengate's own fixed cost per Cursor message (5 tool definitions plus the always-on rule) is about **690 tokens, down from about 1,580** in the first version.
 

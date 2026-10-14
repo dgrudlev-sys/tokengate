@@ -62,6 +62,27 @@ def mentioned_files(prompt: str, attachments, graph) -> list[str]:
     return found[:5]
 
 
+IMAGE_EXT = re.compile(r"\.(png|jpe?g|gif|webp|bmp|svg|heic|tiff?)\b", re.I)
+IMAGE_WORDS = re.compile(r"\b(screenshot|screen ?shot|this (image|picture|pic|mockup|design)|the (image|picture|mockup)"
+                         r"|attached (image|picture|screenshot)|looks like this|as shown)\b", re.I)
+
+
+def image_reason(prompt: str, attachments) -> str | None:
+    """Why this prompt depends on an image, or None. Free text models can't see images,
+    so these always go to Cursor rather than getting a blind answer."""
+    for a in attachments or []:
+        if isinstance(a, dict):
+            kind = str(a.get("type") or a.get("mime_type") or a.get("mimeType") or "").lower()
+            path = str(a.get("file_path") or a.get("filePath") or a.get("path") or a.get("name") or "")
+            if "image" in kind or IMAGE_EXT.search(path) or any(k in a for k in ("image", "image_url", "data_url")):
+                return "image attached"
+        elif isinstance(a, str) and IMAGE_EXT.search(a):
+            return "image attached"
+    if IMAGE_EXT.search(prompt) or IMAGE_WORDS.search(prompt):
+        return "prompt refers to an image"
+    return None
+
+
 def decide(prompt: str, mode: str, level: str, files: list[str]) -> tuple[bool, str, str]:
     """-> (try_tokengate, kind, reason)"""
     text = prompt.strip()
@@ -117,6 +138,13 @@ def handle(payload: dict) -> dict:
                     f"This chat has {turns} messages, and every new message re-sends all of them. "
                     "Start a new chat (Ctrl/Cmd+N) with a one-line summary to save tokens. "
                     "To keep going here anyway, just send your message again."}
+
+    why_image = image_reason(prompt, payload.get("attachments"))
+    if why_image:
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%H:%M:%S')} go=False ({why_image}; text-only free models can't see it) "
+                     f":: {prompt[:120]!r}\n")
+        return {"continue": True}
 
     graph = Graph(cfg).load()
     graph.build()
