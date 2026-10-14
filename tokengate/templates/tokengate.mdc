@@ -1,34 +1,11 @@
 ---
-description: Token budget policy. Use tokengate MCP tools before spending Cursor tokens.
+description: Quota policy (tokengate)
 alwaysApply: true
 ---
-
-# Token budget: tokengate first, Cursor tokens last
-
-The user's Cursor quota is limited. The `tokengate` MCP server provides free alternatives.
-
-**Before anything else:** if `.tokengate/HANDOFF.md` exists and its `prompt:` matches the user's message,
-tokengate already tried free models and gathered the context. Read that file instead of exploring.
-Call `fuel_gauge` once per conversation. A `[gauge WARN|RESERVE|EMPTY]` line in any tool output
-means the quota is nearly gone: delegate everything delegable, never re-read files, answer in a few lines.
-
-Use the tools in this order:
-
-1. **Explore with the graph instead of reading files.**
-   - `repo_map` once per conversation for orientation.
-   - `graph_file <path>` for a file's outline (signatures + line numbers) and its neighbours.
-   - `graph_symbol <name>` to find a definition. `graph_impact <path>` before changing shared code.
-   - `search <regex>` instead of grep-style file reads.
-   - Then read **only the line ranges** you actually need, never whole large files.
-2. **Delegate the writing.** For edits, tests, docs, reviews, explanations and summaries call
-   `delegate(task, files, kind)` first. It runs on free models (local Ollama → NVIDIA NIM).
-   - `status=done` with `files changed` → the edit is already on disk. Do not rewrite it; skim with a
-     narrow read or `run_checks` and move on.
-   - `status=escalate` → do the task yourself using the context pack it returned (don't re-explore).
-3. **Batch work** over many files with `distribute(task, glob, kind)`, not file-by-file in chat.
-4. **Verify with `run_checks`**, not by re-reading code.
-5. Keep replies short. No restating code you didn't change. No full-file rewrites when a small edit works.
-
-Do the work yourself straight away (skip delegate) only when: the task needs this conversation's
-history, it spans many files with tightly coupled design decisions, or delegate already escalated
-the same task.
+Paid quota is scarce. Free tools first:
+- If `.tokengate/HANDOFF.md` matches this prompt, use it; don't re-explore.
+- Explore via `code` (map/file/find/explain/impact/pack/search), then read only needed line ranges. Never open whole large files.
+- Edits, tests, docs, reviews, explanations: `delegate` first; do it yourself only on status=escalate. Done edits are on disk: don't rewrite them.
+- Many files: `distribute`. Verify with `check`, not by re-reading.
+- `[gauge WARN|RESERVE|EMPTY]` in output: delegate everything, reply in a few lines.
+- Terse answers. No restating unchanged code. Small diffs, never full-file rewrites.

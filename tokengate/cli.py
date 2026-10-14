@@ -69,7 +69,7 @@ def cmd_init(args) -> None:
     hooks_path.write_text(json.dumps(hooks, indent=2) + "\n", "utf-8")
     print(f"wrote {hooks_path}")
 
-    for target, lines in ((root / ".cursorignore", _template("cursorignore").splitlines()),
+    for target, lines in ((root / ".cursorignore", _template("cursorignore").splitlines() + [".graphifyignore"]),
                           (root / ".gitignore", [".tokengate/"])):
         existing = target.read_text("utf-8").splitlines() if target.exists() else []
         missing = [l for l in lines if l not in existing]
@@ -80,13 +80,15 @@ def cmd_init(args) -> None:
 
     cfg = config.load(root)
     print("graph:", Graph(cfg).build(incremental=False))
+    from . import gfy
+    print("graphify:", gfy.build(cfg) or "not installed (pip install graphifyy) - using built-in graph only")
     from .visualize import export
     for k, v in export(Graph(cfg).load()).items():
         print(f"{k}: {v}")
     if not shutil.which("rg"):
         print("tip: install ripgrep (rg) for faster search")
-    print("\nNext: set NVIDIA_API_KEY (https://build.nvidia.com), restart Cursor, and enable the "
-          "'tokengate' server under Settings > MCP.")
+    print("\nNext: add API keys for the free providers you sign up to (README: 'Free API providers'),\n"
+          "run `tokengate models`, restart Cursor and enable 'tokengate' under Settings > MCP.")
 
 
 def cmd_install_statusbar() -> None:
@@ -105,7 +107,8 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("init"); p.add_argument("project", nargs="?")
     sub.add_parser("index")
     sub.add_parser("viz")
-    p = sub.add_parser("query"); p.add_argument("what", choices=["symbol", "file", "impact"]); p.add_argument("name")
+    p = sub.add_parser("query"); p.add_argument("what", choices=["map", "file", "find", "explain", "impact", "path", "hubs", "pack", "search"])
+    p.add_argument("q", nargs="?", default=""); p.add_argument("q2", nargs="?", default="")
     p = sub.add_parser("pack"); p.add_argument("task"); p.add_argument("-f", "--files", nargs="*")
     p = sub.add_parser("ask"); p.add_argument("task"); p.add_argument("-f", "--files", nargs="*")
     p.add_argument("-k", "--kind", default="general"); p.add_argument("--dry-run", action="store_true")
@@ -173,14 +176,12 @@ def main(argv: list[str] | None = None) -> None:
         for k, v in export(graph).items():
             print(f"{k}: {v}")
     elif args.cmd == "query":
-        if args.what == "symbol":
-            for h in graph.find_symbol(args.name)[:25]:
-                print(f"{h['file']}:{h['line']} [{h['kind']}] {h['signature']}")
-        else:
-            p = graph.resolve_file(args.name)
-            if not p:
-                sys.exit(f"no file matching {args.name!r}")
-            print(graph.outline(p) if args.what == "file" else "\n".join(graph.impact(p)))
+        from . import gfy
+        from .explore import Explorer
+        from .router import Gate
+        if gfy.available() and not gfy.graph_path(cfg).exists():
+            gfy.build(cfg)
+        print(Explorer(Gate(cfg, graph)).run(args.what, args.q, args.q2))
     else:
         from .router import Gate
         gate = Gate(cfg, graph)

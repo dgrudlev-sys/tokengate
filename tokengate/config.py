@@ -37,27 +37,31 @@ class Provider:
         return os.environ.get(self.api_key_env) if self.api_key_env else None
 
     @property
+    def url(self) -> str:
+        """base_url with ${ENV} expanded (e.g. Cloudflare's account id)."""
+        return os.path.expandvars(self.base_url)
+
+    @property
     def available(self) -> bool:
-        if self.may_train and os.environ.get("TOKENGATE_ALLOW_TRAINING", "") != "1" and not _ALLOW_TRAINING[0]:
+        if self.may_train and not _training_allowed(self.name):
+            return False
+        if "$" in self.url:  # an env var in base_url isn't set
             return False
         return self.enabled and (self.api_key_env is None or bool(self.api_key))
 
 
-_ALLOW_TRAINING = [False]  # set from tokengate.toml `allow_training_providers`
+_ALLOW_TRAINING: list = [False]  # tokengate.toml `allow_training`: true / false / ["mistral", ...]
+
+
+def _training_allowed(name: str) -> bool:
+    if os.environ.get("TOKENGATE_ALLOW_TRAINING", "") == "1":
+        return True
+    allowed = _ALLOW_TRAINING[0]
+    return name in allowed if isinstance(allowed, list) else bool(allowed)
 
 
 def _default_providers() -> list[Provider]:
     return [
-        # Local model first (free, private). Silently skipped if Ollama isn't running.
-        Provider(
-            name="ollama",
-            base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-            api_key_env=None,
-            models=["qwen2.5-coder:7b"],
-            rpm=600,
-            max_parallel=1,
-            enabled=os.environ.get("TOKENGATE_OLLAMA", "1") != "0",
-        ),
         # NVIDIA NIM (build.nvidia.com) – OpenAI-compatible, free developer credits.
         # Run `tokengate models` to see what your key can use and edit tokengate.toml.
         Provider(
@@ -71,6 +75,16 @@ def _default_providers() -> list[Provider]:
             ],
             rpm=35,
             max_parallel=4,
+        ),
+        # Local model last: offline fallback. Silently skipped if Ollama isn't running.
+        Provider(
+            name="ollama",
+            base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+            api_key_env=None,
+            models=["qwen2.5-coder:7b"],
+            rpm=600,
+            max_parallel=1,
+            enabled=os.environ.get("TOKENGATE_OLLAMA", "1") != "0",
         ),
     ]
 
@@ -91,8 +105,8 @@ class Config:
     gauge_reserve_pct: float = 85
     # Cursor beforeSubmitPrompt hook: "auto" | "always" | "off"
     prompt_gate: str = "auto"
-    # Use providers whose free tier may train on your prompts (Gemini free, Mistral Experiment)?
-    allow_training_providers: bool = False
+    # Providers whose free tier may train on your prompts that you accept: true / false / ["mistral"]
+    allow_training: bool | list = False
 
     @property
     def state_dir(self) -> Path:
@@ -124,10 +138,12 @@ def load(root: Path | None = None) -> Config:
         return cfg
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     for key in ("ignore", "extensions", "max_context_tokens", "pack_budget_tokens", "cache_ttl_days",
-                "gauge_warn_pct", "gauge_reserve_pct", "prompt_gate", "allow_training_providers"):
+                "gauge_warn_pct", "gauge_reserve_pct", "prompt_gate", "allow_training"):
         if key in data:
             setattr(cfg, key, data[key])
     if "providers" in data:
         cfg.providers = [Provider(**p) for p in data["providers"]]
-    _ALLOW_TRAINING[0] = bool(cfg.allow_training_providers)
+    if "allow_training_providers" in data:  # older name
+        cfg.allow_training = data["allow_training_providers"]
+    _ALLOW_TRAINING[0] = cfg.allow_training
     return cfg

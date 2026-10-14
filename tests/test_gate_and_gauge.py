@@ -110,3 +110,35 @@ def test_training_providers_off_by_default(monkeypatch):
     assert not p.available
     monkeypatch.setenv("TOKENGATE_ALLOW_TRAINING", "1")
     assert p.available
+
+
+def test_training_allow_list(monkeypatch):
+    from tokengate import config as c
+    monkeypatch.setenv("SOME_KEY", "x")
+    monkeypatch.setattr(c, "_ALLOW_TRAINING", [["mistral"]])
+    assert Provider("mistral", "http://x", "SOME_KEY", ["m"], may_train=True).available
+    assert not Provider("gemini", "http://x", "SOME_KEY", ["m"], may_train=True).available
+
+
+def test_base_url_env_expansion(monkeypatch):
+    p = Provider("cloudflare", "https://x/accounts/${CF_ACC}/ai/v1", "SOME_KEY", ["m"])
+    monkeypatch.setenv("SOME_KEY", "x")
+    monkeypatch.delenv("CF_ACC", raising=False)
+    assert not p.available
+    monkeypatch.setenv("CF_ACC", "abc")
+    assert p.available and p.url == "https://x/accounts/abc/ai/v1"
+
+
+def test_explorer_with_graphify(project):
+    import pytest
+    from tokengate import gfy
+    from tokengate.explore import Explorer
+    if not gfy.available():
+        pytest.skip("graphify not installed")
+    cfg = make_cfg(project)
+    assert "nodes" in gfy.build(cfg)
+    ex = Explorer(Gate(cfg))
+    assert "math.ts" in ex.run("explain", "add()") or "add" in ex.run("explain", "add()")
+    assert "app.tsx" in ex.run("impact", "add()")
+    assert "export function add" in ex.run("file", "math.ts")
+    assert "unknown op" in ex.run("nope")

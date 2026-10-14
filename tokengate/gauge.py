@@ -11,7 +11,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from . import cursor_usage
+from . import config, cursor_usage
 from .cache import Store
 from .config import Config
 
@@ -82,7 +82,8 @@ def _free_activity(store: Store, cfg: Config) -> dict:
         minute = store.db.execute(q, (p.name, now - 60)).fetchone()
         day = store.db.execute(q, (p.name, now - 86400)).fetchone()
         month = store.db.execute(q, (p.name, now - 30 * 86400)).fetchone()
-        rows.append({"name": p.name, "available": p.available, "may_train": p.may_train,
+        rows.append({"name": p.name, "available": p.available,
+                     "may_train": p.may_train and not config._training_allowed(p.name),
                      "rpm_limit": p.rpm, "rpd_limit": p.rpd, "requests_last_minute": minute[0],
                      "requests_24h": day[0], "tokens_24h": day[1], "requests_30d": month[0], "tokens_30d": month[1]})
     return {"providers": rows,
@@ -171,12 +172,16 @@ def _message(r: Reading) -> str:
 
 
 def banner(cfg: Config, store: Store) -> str:
-    """One line prepended to MCP tool output when usage is getting tight (empty otherwise)."""
+    """Short line prepended to MCP tool output when usage is getting tight (empty otherwise)."""
     try:
         r = read(cfg, store)
     except Exception:  # the gauge must never break the tools
         return ""
-    return f"[gauge {r.level.upper()}] {r.message}\n" if r.level in ("warn", "reserve", "empty") else ""
+    if r.level not in ("warn", "reserve", "empty"):
+        return ""
+    left = f"{max(0, 100 - (r.percent_used or 0)):.0f}% left" + (f", out ~{r.runs_out_on}" if r.runs_out_on else "")
+    advice = "prefer tokengate" if r.level == "warn" else "delegate everything, minimal replies"
+    return f"[gauge {r.level.upper()}: {left}; {advice}]\n"
 
 
 def bar(r: Reading, width: int = 30) -> str:

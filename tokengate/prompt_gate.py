@@ -9,8 +9,9 @@ Cursor runs this before your chat message reaches its model (stdin: JSON with `p
                                     holding the context already gathered.
   * anything goes wrong          -> {"continue": true} (fail open; never blocks your work).
 
-Modes (tokengate.toml `prompt_gate`): "auto" (default: clear, self-contained tasks only),
-"always" (every prompt), "off". Reserve/empty fuel level upgrades "auto" to "always".
+Modes (tokengate.toml `prompt_gate`): "always" (every self-contained prompt), "auto" (clear
+explain/review/tests/docs tasks and small named-file edits only), "off". Prompts that lean on
+chat history ("yes do it", "fix the error above") always go to Cursor. Reserve/empty fuel level upgrades "auto" to "always".
 Start a message with "!" to send it straight to Cursor.
 """
 
@@ -69,10 +70,10 @@ def decide(prompt: str, mode: str, level: str, files: list[str]) -> tuple[bool, 
     if text.startswith("!"):
         return False, "", "user forced Cursor with '!'"
     kind = classify(text)
+    if len(text.split()) < 4 or NEEDS_HISTORY.search(text):
+        return False, kind, "depends on chat history"  # a fresh model can't see the chat
     if mode == "always" or level in ("reserve", "empty"):
         return True, kind, f"mode={mode} level={level}"
-    if len(text.split()) < 4 or NEEDS_HISTORY.search(text):
-        return False, kind, "depends on chat history"
     if kind in ("explain", "summarize", "review", "docs", "tests"):
         return True, kind, "self-contained task"
     if kind == "edit" and 1 <= len(files) <= 2:

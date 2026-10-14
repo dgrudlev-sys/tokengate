@@ -80,7 +80,7 @@ class Client:
         if self.p.api_key:
             headers["Authorization"] = f"Bearer {self.p.api_key}"
         req = urllib.request.Request(
-            self.p.base_url.rstrip("/") + path,
+            self.p.url.rstrip("/") + path,
             data=json.dumps(body).encode() if body is not None else None,
             headers=headers,
             method="POST" if body is not None else "GET",
