@@ -1,0 +1,20 @@
+{
+  "name": "tokengate-gauge",
+  "displayName": "tokengate fuel gauge",
+  "description": "Cursor usage left, in the status bar.",
+  "version": "0.1.0",
+  "publisher": "tokengate",
+  "engines": { "vscode": "^1.80.0" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [{ "command": "tokengate.gauge.refresh", "title": "tokengate: Refresh fuel gauge" }],
+    "configuration": {
+      "title": "tokengate gauge",
+      "properties": {
+        "tokengate.python": { "type": "string", "default": "python", "description": "Python with tokengate installed." },
+        "tokengate.refreshMinutes": { "type": "number", "default": 5 }
+      }
+    }
+  }
+}
