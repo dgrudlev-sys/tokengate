@@ -129,17 +129,29 @@ class Config:
         return d
 
 
+PROJECT_MARKERS = (".git", "package.json", "pubspec.yaml", "pyproject.toml", "Cargo.toml", "go.mod")
+
+
+def is_project(root: Path) -> bool:
+    """False for the home folder, a drive root, or anything without project markers:
+    indexing those would scan a whole disk."""
+    root = root.resolve()
+    if root == Path.home().resolve() or root.parent == root:
+        return False
+    return (root / "tokengate.toml").exists() or any((root / m).exists() for m in PROJECT_MARKERS)
+
+
 def find_root(start: Path | None = None) -> Path:
     """Walk up from `start` to the nearest dir with tokengate.toml / .git / package.json."""
-    env = os.environ.get("TOKENGATE_ROOT")
-    if env:
+    env = os.environ.get("TOKENGATE_ROOT", "")
+    if env and "${" not in env:  # an unexpanded ${workspaceFolder} means "no folder open"
         return Path(env).resolve()
     p = (start or Path.cwd()).resolve()
     for d in [p, *p.parents]:
         if (d / "tokengate.toml").exists():
             return d
     for d in [p, *p.parents]:
-        if (d / ".git").exists() or (d / "package.json").exists():
+        if any((d / m).exists() for m in PROJECT_MARKERS):
             return d
     return p
 

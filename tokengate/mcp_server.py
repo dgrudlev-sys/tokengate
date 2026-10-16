@@ -27,7 +27,8 @@ INSTRUCTIONS = ("Saves the user's paid Cursor quota. Explore with `code` instead
 
 cfg = config.load()
 store = Store(cfg.state_dir, cfg.cache_ttl_days)
-graph = Graph(cfg).load()
+graph = Graph(cfg).load(build_if_missing=False)  # built lazily, never blocks startup
+PROJECT = config.is_project(cfg.root)
 gate = Gate(cfg, graph, store)
 explorer = Explorer(gate)
 _last_build = 0.0
@@ -47,6 +48,8 @@ def _rebuild_gfy() -> None:
 def _fresh() -> Graph:
     """Incremental re-index at most every 5 s; graphify refreshes in the background on change."""
     global _last_build
+    if not PROJECT:
+        return graph
     if time.time() - _last_build > 5:
         changed = graph.build()["reparsed"]
         _last_build = time.time()
@@ -56,6 +59,10 @@ def _fresh() -> Graph:
             elif changed:
                 threading.Thread(target=_rebuild_gfy, daemon=True).start()
     return graph
+
+
+NO_PROJECT = ("tokengate: no project folder detected (cwd: {root}). Open a project folder in the editor, "
+              "or set TOKENGATE_ROOT in the MCP config.")
 
 
 def _g(text: str) -> str:
@@ -70,6 +77,8 @@ def code(op: str, q: str = "", q2: str = "") -> str:
     | explain q=symbol (callers/callees with lines) | impact q=symbol|file (what breaks)
     | path q=A q2=B (call chain) | hubs | pack q=task q2=files,csv (minimal context)
     | search q=regex q2=glob. Then read only the line ranges you need."""
+    if not PROJECT:
+        return NO_PROJECT.format(root=cfg.root)
     _fresh()
     return _g(explorer.run(op, q, q2))
 
@@ -109,7 +118,8 @@ def gauge_status() -> str:
 
 
 def main() -> None:
-    _fresh()
+    if PROJECT:  # warm the index in the background; the server answers Cursor immediately
+        threading.Thread(target=_fresh, daemon=True).start()
     mcp.run()
 
 
