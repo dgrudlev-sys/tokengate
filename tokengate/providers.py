@@ -76,7 +76,9 @@ class Client:
         return [m for m in self.p.models if f"{self.p.name}/{m}" not in self._dead_models]
 
     def _request(self, path: str, body: dict | None = None, timeout: int | None = None) -> dict:
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        headers = {"Content-Type": "application/json", "Accept": "application/json",
+                   # some providers' firewalls (e.g. Groq via Cloudflare, error 1010) block Python-urllib
+                   "User-Agent": "tokengate/0.1 (+https://github.com/dgrudlev-sys/tokengate)"}
         if self.p.api_key:
             headers["Authorization"] = f"Bearer {self.p.api_key}"
         req = urllib.request.Request(

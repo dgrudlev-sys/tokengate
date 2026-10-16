@@ -102,7 +102,7 @@ def validate(provider: Provider, g: Guide, tries: int = 6) -> tuple[str, list[st
         listed = client.list_models()
     except ProviderError as e:
         msg = str(e)
-        if msg.startswith(("401", "403")):
+        if msg.startswith(("401", "403")) and "1010" not in msg:  # 1010 = firewall, not the key
             return "bad_key", [], _redact(msg)
         if "unreachable" in msg:
             return "offline", [], _redact(msg)
