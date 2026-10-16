@@ -200,14 +200,36 @@ def _run(payload: dict, claude: bool) -> dict:
     return passthrough
 
 
+def read_payload(raw: bytes) -> dict:
+    """Decode hook input robustly. Editors on Windows may send UTF-16 or a BOM, or wrap the
+    JSON in shell noise; find the JSON object whatever the encoding."""
+    if not raw.strip():
+        return {}
+    encodings = ["utf-8-sig"]
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff") or b"\x00" in raw[:8]:
+        encodings.insert(0, "utf-16")
+    for enc in encodings + ["utf-16-le", "cp1252"]:
+        try:
+            text = raw.decode(enc).strip().lstrip("\ufeff")
+        except UnicodeDecodeError:
+            continue
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except ValueError:
+                continue
+    raise ValueError(f"unreadable hook input ({len(raw)} bytes, starts {raw[:24]!r})")
+
+
 def main() -> None:
     try:
-        payload = json.loads(sys.stdin.read() or "{}")
+        payload = read_payload(sys.stdin.buffer.read())
         out = handle(payload)
     except Exception as e:  # fail open
         out = {}
         try:
-            (Path.cwd() / ".tokengate" / "hook.log").open("a").write(f"error: {e!r}\n")
+            (Path.cwd() / ".tokengate" / "hook.log").open("a", encoding="utf-8").write(f"error: {e!r}\n")
         except OSError:
             pass
     sys.stdout.write(json.dumps(out))

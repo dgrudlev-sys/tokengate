@@ -238,3 +238,13 @@ def test_translate_squeeze_and_stop_hook(project, fake_llm, tmp_path):
         {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Bug fixed."}]}},
     ]))
     assert style.last_assistant_text(tr) == "Bug fixed."
+
+
+def test_hook_input_decoding_windows_variants():
+    payload = {"prompt": "explain add", "workspace_roots": ["C:\\\\proj"]}
+    import json as _j
+    raw = _j.dumps(payload)
+    for blob in (raw.encode(), b"\xef\xbb\xbf" + raw.encode(), raw.encode("utf-16"), raw.encode("utf-16-le"),
+                 b"\r\n" + raw.encode() + b"\r\n"):
+        assert prompt_gate.read_payload(blob) == payload
+    assert prompt_gate.read_payload(b"   ") == {}
