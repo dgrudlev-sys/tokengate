@@ -172,3 +172,17 @@ def test_fan_out(project, fake_llm):
     out = fan_out(gate, "summarize", "src/**")
     assert out["files"] == 2 and out["done"] == 2 and out["summary"]
     assert (project / out["report"]).exists()
+
+
+def test_dart_symbols_public_unless_underscore(tmp_path):
+    (tmp_path / "pubspec.yaml").write_text("name: calc\n")
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "keypad.dart").write_text(
+        "import 'package:flutter/material.dart';\n\nclass Keypad extends StatelessWidget {\n}\n"
+        "class _KeypadState {}\nmixin Speaks {}\n")
+    cfg = make_cfg(tmp_path)
+    g = Graph(cfg)
+    g.build()
+    syms = {s.name: s.exported for s in g.files["lib/keypad.dart"].symbols}
+    assert syms["Keypad"] and not syms["_KeypadState"] and syms["Speaks"]
+    assert g.find_symbol("keypad")[0]["file"] == "lib/keypad.dart"

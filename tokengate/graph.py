@@ -30,6 +30,7 @@ TS_DECL = re.compile(
     r"(?P<name>[A-Za-z_$][\w$]*)",
     re.M,
 )
+DART_DECL = re.compile(r"^\s*(?:abstract\s+|sealed\s+|base\s+|final\s+)*(?P<kind>mixin|extension)\s+(?P<name>[A-Za-z_]\w*)", re.M)
 SQL_DECL = re.compile(
     r"CREATE\s+(?:VIRTUAL\s+)?(?P<kind>TABLE|VIEW|INDEX|TRIGGER)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>[\w.]+)",
     re.I,
@@ -163,7 +164,14 @@ class Graph:
             if len(sig) > 160:
                 sig = sig[:157] + "..."
             kind = m["kind"].replace("abstract ", "")
-            node.symbols.append(Symbol(m["name"], kind, line_no, bool(m["export"]), sig))
+            # Dart has no `export` keyword: everything not starting with _ is public
+            exported = not m["name"].startswith("_") if path.suffix == ".dart" else bool(m["export"])
+            node.symbols.append(Symbol(m["name"], kind, line_no, exported, sig))
+        if path.suffix == ".dart":
+            for m in DART_DECL.finditer(text):
+                line_no = text.count("\n", 0, m.start()) + 1
+                node.symbols.append(Symbol(m["name"], m["kind"], line_no, not m["name"].startswith("_"),
+                                           lines[line_no - 1].strip()[:160]))
         for m in TS_IMPORT.finditer(text):
             spec = m["src"] or m["side"] or m["req"] or m["dyn"]
             names = re.findall(r"[A-Za-z_$][\w$]*", re.sub(r"\btype\b|\bas\s+\w+", "", m["what"] or ""))
