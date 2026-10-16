@@ -45,7 +45,7 @@ def test_wizard_rejects_bad_key_then_accepts_good_one(project, fake_llm, monkeyp
     monkeypatch.setattr(builtins, "input", lambda *a: "")
     setup_wizard.run(cfg, ["groq"])
     assert keys.get("GROQ_API_KEY") == "gsk_good"
-    assert keys.models("groq") == ["qwen/qwen3-coder-480b", "llama-3.3-70b-versatile"]
+    assert keys.models("groq") == ["qwen/qwen3-coder-480b"]          # only models that actually answered
     rows = dict((r[0], r[1]) for r in setup_wizard.status_rows(cfg, live=True))
     assert rows["Groq"] == "OK"
 
@@ -70,3 +70,16 @@ def test_circuit_breaker_moves_failing_provider_last(project):
     for _ in range(3):
         gate.store.log("fail", "a", "m")
     assert [p.name for p in gate._ordered_providers()] == ["b", "a"]
+
+
+def test_validate_skips_models_that_fail(project, fake_llm):
+    FakeLLM.listed = ["qwen/qwen3-coder:free", "deepseek/deepseek-chat-v3.1:free"]
+    FakeLLM.replies = {"deepseek/deepseek-chat-v3.1:free": "ok"}          # first one 404s (not free any more)
+    p = Provider("openrouter", fake_llm, None, ["x"], rpm=100)
+    status, models, _ = setup_wizard.validate(p, setup_wizard.guide("openrouter"))
+    assert status == "ok" and models == ["deepseek/deepseek-chat-v3.1:free"]
+
+
+def test_redact_hides_tokens_and_account_ids():
+    out = setup_wizard._redact("404 Could not route to /client/v4/accounts/cfut_p9nPmjtABCDEF/ai and key nvapi-abcdef1234")
+    assert "p9nPmjt" not in out and "abcdef1234" not in out

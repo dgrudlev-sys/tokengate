@@ -83,30 +83,44 @@ def pick_models(available: list[str], g: Guide, limit: int = 3) -> list[str]:
     return picked
 
 
-def validate(provider: Provider, g: Guide) -> tuple[str, list[str], str]:
-    """-> (status ok|bad_key|offline|unknown, picked models, detail)"""
+def _redact(msg: str) -> str:
+    """Never echo account ids / tokens that sit inside URLs or error bodies."""
+    msg = re.sub(r"(accounts/)[^/\s\"']+", r"\1…", msg)
+    return re.sub(r"\b(cfut|nvapi|gsk|sk-or|sk)[-_][A-Za-z0-9_\-]{6,}", r"\1…", msg)[:160]
+
+
+def validate(provider: Provider, g: Guide, tries: int = 6) -> tuple[str, list[str], str]:
+    """-> (status ok|bad_key|offline|unknown, working models, detail).
+    Tries candidate models in order until enough answer: listings often include models
+    that are retired, not free any more, or not enabled for this key."""
     client = Client(provider)
     try:
         listed = client.list_models()
     except ProviderError as e:
         msg = str(e)
         if msg.startswith(("401", "403")):
-            return "bad_key", [], msg[:120]
+            return "bad_key", [], _redact(msg)
         if "unreachable" in msg:
-            return "offline", [], msg[:120]
-        listed = []  # endpoint has no /models (e.g. Cloudflare): fall back to a 1-token chat
-    picked = pick_models(listed, g) if listed else []
-    probe = (picked or provider.models)[:1]
-    if not probe:
-        return "unknown", [], "no chat models found for this key"
-    try:
-        client.chat(probe[0], [{"role": "user", "content": "Reply with: ok"}], max_tokens=3, retries=0)
-    except ProviderError as e:
-        msg = str(e)
-        if msg.startswith(("401", "403")):
-            return "bad_key", [], msg[:120]
-        return ("offline" if "unreachable" in msg else "unknown"), picked, msg[:120]
-    return "ok", picked or probe, f"{len(listed)} models listed" if listed else "chat probe ok"
+            return "offline", [], _redact(msg)
+        listed = []  # endpoint has no /models (e.g. Cloudflare): probe the configured models
+    candidates = pick_models(listed, g, limit=tries) if listed else []
+    candidates += [m for m in provider.models if m not in candidates and (not listed or m in listed)]
+    working, last = [], "no chat models found for this key"
+    for model in candidates[:tries]:
+        try:
+            client.chat(model, [{"role": "user", "content": "Reply with: ok"}], max_tokens=3, retries=0)
+            working.append(model)
+            if len(working) >= 3:
+                break
+        except ProviderError as e:
+            last = _redact(str(e))
+            if last.startswith(("401", "403")) and not working:
+                return "bad_key", [], last
+            if "unreachable" in last:
+                return "offline", [], last
+    if working:
+        return "ok", working, f"{len(working)} working model(s)"
+    return "unknown", [], last
 
 
 def _provider_for(cfg: Config, name: str) -> Provider | None:
@@ -161,7 +175,12 @@ def run(cfg: Config, only: list[str] | None = None, yes: bool = False) -> None:
         except Exception:
             pass
         for env, prompt in g.extra_env.items():
-            val = input(f"   {prompt}: ").strip()
+            while True:
+                val = input(f"   {prompt}: ").strip()
+                if not val or env != "CLOUDFLARE_ACCOUNT_ID" or re.fullmatch(r"[0-9a-f]{32}", val):
+                    break
+                print("   That isn't an Account ID (32 characters, 0-9 and a-f; on the dashboard home page). "
+                      "Looks like a token - paste the token at the next prompt instead.")
             if val:
                 keys.save(env, val)
         for attempt in range(3):
