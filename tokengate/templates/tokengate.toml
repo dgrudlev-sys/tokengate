@@ -2,7 +2,7 @@
 
 # Directories never indexed (also put them in .cursorignore so Cursor doesn't index them either)
 ignore = ["node_modules", ".git", ".expo", "android", "ios", "build", "dist", "__pycache__", ".venv", ".tokengate", "coverage", "Pods"]
-extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sql"]
+extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sql", ".dart", ".go", ".rs", ".java", ".kt", ".swift", ".cs"]
 
 max_context_tokens = 12000   # cap on context sent to a free model per call
 pack_budget_tokens = 2500    # cap on context packs returned to Cursor

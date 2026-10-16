@@ -31,7 +31,7 @@ def test_key_store_roundtrip_and_env_precedence(monkeypatch):
     assert keys.get("GROQ_API_KEY") == "gsk_env"
     keys.save_models("groq", ["a", "b"])
     p = Provider("groq", "http://x", "GROQ_API_KEY", ["c", "a"])
-    assert p.models == ["a", "b", "c"]                 # setup picks first, config models kept as fallback
+    assert p.models == ["a", "b"]                      # only models setup verified; stale defaults dropped
     assert Provider("groq", "http://x", "GROQ_API_KEY", ["c"], pin_models=True).models == ["c"]
 
 

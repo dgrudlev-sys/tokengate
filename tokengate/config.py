@@ -19,7 +19,8 @@ DEFAULT_IGNORE = [
     "__pycache__", ".venv", "venv", ".tokengate", "coverage", ".turbo", "Pods",
 ]
 
-DEFAULT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sql"]
+DEFAULT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sql", ".dart", ".go", ".rs",
+                      ".java", ".kt", ".swift", ".cs"]
 
 
 @dataclass
@@ -38,8 +39,8 @@ class Provider:
 
     def __post_init__(self):
         picked = None if self.pin_models else keys.models(self.name)
-        if picked:  # validated by `tokengate setup` against what the key can actually use
-            self.models = picked + [m for m in self.models if m not in picked]
+        if picked:  # validated by `tokengate setup`: only these are known to work for this key
+            self.models = list(picked)
 
     @property
     def api_key(self) -> str | None:
