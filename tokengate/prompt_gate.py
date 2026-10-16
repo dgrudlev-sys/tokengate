@@ -111,10 +111,20 @@ def _open_in_editor(path: Path) -> None:
             pass
 
 
+def is_claude_code(payload: dict) -> bool:
+    """Claude Code sends hook_event_name "UserPromptSubmit" and a cwd; Cursor sends
+    "beforeSubmitPrompt" (it also has hook_event_name, so that alone proves nothing)
+    with workspace_roots."""
+    event = payload.get("hook_event_name", "")
+    if event:
+        return event == "UserPromptSubmit"
+    return "transcript_path" in payload and "workspace_roots" not in payload
+
+
 def handle(payload: dict) -> dict:
     """Run the gate for one prompt. Accepts Cursor's or Claude Code's hook payload and
     answers in the same client's format."""
-    claude = "hook_event_name" in payload or "transcript_path" in payload
+    claude = is_claude_code(payload)
     out = _run(payload, claude)
     if not claude:
         r = {"continue": out["continue"]}

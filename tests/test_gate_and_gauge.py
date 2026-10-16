@@ -248,3 +248,21 @@ def test_hook_input_decoding_windows_variants():
                  b"\r\n" + raw.encode() + b"\r\n"):
         assert prompt_gate.read_payload(blob) == payload
     assert prompt_gate.read_payload(b"   ") == {}
+
+
+def test_client_detection():
+    assert prompt_gate.is_claude_code({"hook_event_name": "UserPromptSubmit", "cwd": "/x", "prompt": "p"})
+    cursor = {"hook_event_name": "beforeSubmitPrompt", "conversation_id": "c", "generation_id": "g",
+              "workspace_roots": ["C:/proj"], "transcript_path": "C:/t.jsonl", "prompt": "p"}
+    assert not prompt_gate.is_claude_code(cursor)
+    assert not prompt_gate.is_claude_code({"prompt": "p", "workspace_roots": ["/x"]})
+
+
+def test_cursor_payload_with_event_name_gets_cursor_format(project, fake_llm, monkeypatch):
+    FakeLLM.replies = {"m": "add() returns the sum."}
+    (project / "tokengate.toml").write_text(
+        f'[[providers]]\nname = "nvidia"\nbase_url = "{fake_llm}"\nmodels = ["m"]\nrpm = 100\n')
+    monkeypatch.setattr(cursor_usage, "fetch", lambda: cursor_usage.CursorUsage(None, source="unavailable"))
+    out = prompt_gate.handle({"hook_event_name": "beforeSubmitPrompt", "workspace_roots": [str(project)],
+                              "prompt": "explain what add does in math.ts"})
+    assert out["continue"] is False and "0 Cursor tokens" in out["user_message"]
