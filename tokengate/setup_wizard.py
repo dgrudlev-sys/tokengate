@@ -80,7 +80,11 @@ def pick_models(available: list[str], g: Guide, limit: int = 3) -> list[str]:
                 break
         if len(picked) >= limit:
             break
-    return picked
+    # nothing on the preference list (free catalogues change weekly): fall back to whatever chat
+    # models the key offers, biggest-looking first
+    rest = sorted((m for m in cands if m not in picked),
+                  key=lambda m: -max([int(x) for x in re.findall(r"(\d+)b", m.lower())] or [0]))
+    return (picked + rest)[:limit]
 
 
 def _redact(msg: str) -> str:

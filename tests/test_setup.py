@@ -83,3 +83,9 @@ def test_validate_skips_models_that_fail(project, fake_llm):
 def test_redact_hides_tokens_and_account_ids():
     out = setup_wizard._redact("404 Could not route to /client/v4/accounts/cfut_p9nPmjtABCDEF/ai and key nvapi-abcdef1234")
     assert "p9nPmjt" not in out and "abcdef1234" not in out
+
+
+def test_pick_models_falls_back_to_any_free_model():
+    g = setup_wizard.guide("openrouter")
+    listed = ["some-lab/new-model-7b:free", "other/big-model-70b:free", "paid/model-405b"]
+    assert setup_wizard.pick_models(listed, g) == ["other/big-model-70b:free", "some-lab/new-model-7b:free"]
